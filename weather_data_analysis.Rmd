@@ -1,0 +1,142 @@
+---
+title: "weather_data "
+author: "Mihkail Cornell"
+date: "2023-08-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidymodels)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(lubridate)
+
+
+# Leyte
+alangalang_weather    <- read_csv("weather_data/Alangalang Weather.csv")
+abuyog_weather        <- read_csv("weather_data/Abuyog Weather.csv")
+dulag_weather         <- read_csv("weather_data/Dulag Weather.csv")
+
+
+# Southern Leyte
+maasin_weather        <- read_csv("weather_data/Maasin Weather.csv")
+tomasoppus_weather    <- read_csv("weather_data/Tomas Oppus Weather.csv")
+malitbog_weather      <- read_csv("weather_data/Malitbog Weather.csv")
+bontoc_weather        <- read_csv("weather_data/Bontoc Weather.csv")
+
+# Samar
+basey_weather         <- read_csv("weather_data/Basey Weather.csv")
+pinabacdao_weather    <- read_csv("weather_data/Pinabacdao Weather.csv")
+paranas_weather       <- read_csv("weather_data/Paranas Weather.csv")
+```
+
+```{r}
+# Alangalang
+area <- alangalang_weather
+
+area$Date <- as.Date(area$Date, "%d/%m/%Y")
+
+
+area %>%
+  ggplot(aes(Date, y=`Temperature (C)`)) +
+  geom_smooth(alpha = 0.8, size = 2, color = "red", method = "lm", se = FALSE) + 
+  geom_jitter(alpha = 0.4) +
+  scale_x_date(labels = date_format("%Y %b"),
+               limits = as.Date(c("2020-04-01", "2023-08-05")))
+```
+
+```{r}
+area %>%
+  ggplot(aes(Date, `Wind (km/h)`)) +
+  geom_smooth(alpha = 0.8, size = 2, color = "red", method = "lm", se = FALSE) + 
+  geom_jitter(alpha = 0.4) +
+  scale_x_date(labels = date_format("%Y %b"),
+               limits = as.Date(c("2020-04-01", "2023-08-05")))
+```
+```{r}
+area %>%
+  ggplot(aes(Date, `Rainfall (mm)`)) +
+  geom_smooth(alpha = 0.8, size = 2, color = "red", method = "lm", se = FALSE) + 
+  geom_jitter(alpha = 0.4) +
+  # scale_y_continuous(labels = scales::log10_trans())
+  scale_x_date(labels = date_format("%Y %b"),
+               limits = as.Date(c("2020-04-01", "2023-08-05")))
+```
+
+
+```{r}
+area %>%
+  ggplot(aes(reorder(format(Date, '%b'), Date), `Temperature (C)`, fill = format(Date, '%Y'))) +
+  geom_boxplot() +
+  # geom_smooth(alpha = 0.8, size = 2, color = "red", method = "lm", se = FALSE) + 
+  
+  xlab('Month') +
+  guides(fill = guide_legend(title='Year')) +
+  theme_bw()
+```
+
+```{r}
+area %>%
+  ggplot(aes(reorder(format(Date, '%B'), Date), `Rainfall (mm)`, fill = format(Date, '%Y'))) +
+  geom_jitter() +
+  xlab('Month') +
+  guides(fill = guide_legend(title='Year')) +
+  theme_bw()
+```
+
+
+```{r}
+# Monthly temperature average
+library("psych")
+
+suppressWarnings(describe(area))
+```
+
+
+```{r}
+monthly_averages <- 
+  area %>% 
+  mutate( Year = year(Date), Month = month(Date)) %>%
+  group_by(Year, Month) %>%
+  summarise(# arithmetic means
+            mean_temp = mean(`Temperature (C)`),
+            mean_rain = mean(`Rainfall (mm)`),
+            mean_wind = mean(`Wind (km/h)`),
+            mean_humid = mean(`Humidity (%)`),
+            # median
+            median_temp = median(`Temperature (C)`),
+            median_rain = median(`Rainfall (mm)`),
+            median_wind = median(`Wind (km/h)`),
+            median_humid = median(`Humidity (%)`)) 
+
+# October 2020 - August 2023
+collection_weather_avg <-
+  monthly_averages %>% 
+  filter(!(Year == 2020 & Month < 9)) 
+```
+
+
+
+```{r}
+insect_raw$Variety %>% unique()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

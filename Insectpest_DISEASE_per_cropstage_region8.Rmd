@@ -1,0 +1,62 @@
+---
+title: "Insectpest_DISEASE_per_cropstage_region8_CSV"
+author: "Mihkail Cornell"
+date: "2023-08-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidymodels)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+
+pestDisease_df <- read_csv("Insectpest_DISEASE_per_cropstage_region8_CSV.csv")
+
+view(pestDisease_df)
+names(pestDisease_df[2:9])
+```
+
+```{r}
+pestDis_df <- pestDisease_df %>%
+  mutate(crop_stage = `Crop Stage`,
+         blsb = BLSB,
+         common_rust = `Common Rust`,
+         south_rust = `Southern Rust`,
+         downy_mildew = `Downy Mildew`,
+         brown_spot = `Brown Spot`,
+         leaf_spot = `Leaf Spot`,
+         leaf_blight = `Leaf Blight`,
+         stalk_rot = `Stalk Rot`) %>%
+  select(11:19)
+
+pest_dis <- 
+  pestDis_df %>%
+  pivot_longer(cols=2:9, names_to = "disease", values_to = "count") 
+
+```
+
+
+```{r}
+pest_dis %>%
+  ggplot(aes(reorder(disease, count), count)) +
+  geom_col(aes(fill=crop_stage)) +
+  labs(title = "Corn Diseases and Their Occurence on Every Stage",
+              subtitle = "Plot of diseases by count",
+              caption = "Data source: RCPC 8",
+              x = "Disease Type", y = "Count", fill="Corn stage") +
+  theme(axis.text.x= element_text(color="#000000", size=8, angle=45))
+```
+
+
+```{r}
+pest_dis %>% 
+  ggplot(aes(reorder(disease, count), count)) +
+  geom_point(aes(color=crop_stage, fill=crop_stage, size=3),
+             shape=19,
+             show.legend = FALSE) 
+```
+
+

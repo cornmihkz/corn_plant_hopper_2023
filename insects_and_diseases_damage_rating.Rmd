@@ -1,0 +1,44 @@
+---
+title: "insects_and_diseases_damage_rating"
+author: "Mihkail Cornell"
+date: "2023-08-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# insect pests 
+# corn semi-looper DAMAGE
+# corn borer DAMAGE
+# corn earworm DAMAGE "Very slight", "Slight", "Moderately severe", "Severe", "Highly severe"
+rating <- c(1, 3, 5, 7, 9)
+classification <- c("Very slight", "Slight", "Moderate", "Severe", "High")
+
+
+# corn planthopper INFESTATION "No", "Light", "Moderate", "Severe", "Highly severe"
+# corn leaf aphids
+# corn leaf feeders FAW
+# corn leaf feeders cutworm
+rating <- c(1, 3, 5, 7, 9)
+classification <- c("No", "Light", "Moderate", "Severe", "High")
+
+```
+
+```{r}
+# corn diseases
+# bacterial stalk rot INFECTION
+rating <- c(0, 1, 3, 5, 7, 9)
+classification <- c("No", "Very slight", "Light", "Moderate", "Severe", "Very severe")
+
+# brown spot INFECTION
+# BLSB
+# Curvularia Leaf Spot
+# Leaf blight
+# Downy mildew
+# Common corn rust
+rating <- c(0, 1, 3, 5, 7, 9)
+classification <- c("No", "Very slight", "Light", "Moderate", "Heavy", "Very heavy")
+```
+
