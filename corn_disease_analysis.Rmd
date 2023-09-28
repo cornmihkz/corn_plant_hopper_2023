@@ -1,0 +1,2729 @@
+---
+title: "corn_disease_analysis"
+author: "Mihkail Cornell"
+date: "2023-09-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("dplyr")
+library("ggpubr")
+library("tidymodels")
+library("tidyverse")
+library("ggpubr")
+library("broom")
+library("multcompView")
+library("ggpubr")
+library("car")
+
+diseases_raw <- read_csv("../diseases/diseases.csv")
+```
+
+
+```Banded Leaf and Sheath Blight```
+```{r}
+# BandedLeaf and Sheath Blight 
+blsb_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("BandedLeaf and Sheath Blight")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+blsb_df_ev$collect_date <- 
+  as.Date(blsb_df_ev$`Collection Date`, "%B %d, %Y")
+
+blsb_dmg_ev <-
+  blsb_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+blsb_joined_ev <-
+  blsb_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "0"),
+         sum_slight = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "1"),
+         sum_light = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "3"),
+         sum_moderate = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "5"),
+         sum_heavy = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "7"),
+         sum_very = sum(c_across(starts_with("BandedLeaf and Sheath Blight")) == "9"),
+         average_damage_blsb = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_blsb = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_blsb = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(blsb_joined_ev)
+
+
+summary_blsb <-
+  blsb_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_blsb = n() * number_sampled_plants,
+            sum_avg_dmg_blsb = sum(average_damage_blsb),
+            sum_dmg_rate_blsb = sum(damage_rating_blsb),
+            sum_incidence_blsb = sum(incidence_blsb),
+            percent_incidence_blsb = (sum_incidence_blsb / total_count_samples_blsb) * percent_100)
+
+View(summary_blsb)
+
+summary_blsb$order_treat <- ordered(summary_blsb$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_blsb$factor_corn <- factor(summary_blsb$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_blsb$percent_incidence_blsb)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_blsb <- ks.test(summary_blsb$percent_incidence_blsb, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_blsb <- ad.test(summary_blsb$percent_incidence_blsb)
+
+skew_blsb <- skewness(summary_blsb$percent_incidence_blsb)
+kurt_blsb <- kurtosis(summary_blsb$percent_incidence_blsb)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_blsb <- jarque.test(summary_blsb$percent_incidence_blsb)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_blsb <- kruskal.test(percent_incidence_blsb ~ order_treat, summary_blsb)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_blsb <- wilcox.test(percent_incidence_blsb ~ factor_corn, summary_blsb)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_blsb <- summary_blsb %>% friedman_test(percent_incidence_blsb ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_blsb <- leveneTest(percent_incidence_blsb ~ Treatment, summary_blsb)
+levenes_corntype_blsb <- leveneTest(percent_incidence_blsb ~ `Corn Type`, summary_blsb)
+levenes_municipality_blsb <- leveneTest(percent_incidence_blsb ~ Municipality, summary_blsb)
+levenes_province_blsb <- leveneTest(percent_incidence_blsb ~ Province, summary_blsb)
+levenes_fert_corn_blsb <- leveneTest(percent_incidence_blsb ~ interaction(Treatment, `Corn Type`), summary_blsb)
+
+
+# AnOVa
+aov_fert_blsb <- aov(percent_incidence_blsb ~ order_treat, summary_blsb)
+aov_corn_blsb <- aov(percent_incidence_blsb ~ factor_corn, summary_blsb) 
+ttest_corn_blsb <- t.test(percent_incidence_blsb ~ factor_corn, summary_blsb)
+
+# Two way AnOVa
+twoway_fert_corn_blsb <- aov(percent_incidence_blsb ~ order_treat + factor_corn, summary_blsb) 
+tukey_fert_corn_blsb <- TukeyHSD(twoway_fert_corn_blsb)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_blsb <- aov(percent_incidence_blsb ~ order_treat*factor_corn, summary_blsb)
+tukey_fert_corn_inter_blsb <- TukeyHSD(aov_fert_corn_inter_blsb)
+
+aov_fert_blsb %>% summary()
+aov_corn_blsb %>% summary()
+ttest_corn_blsb
+twoway_fert_corn_blsb %>% summary()
+print(tukey_fert_corn_blsb)
+aov_fert_corn_inter_blsb %>% summary()
+print(tukey_fert_corn_inter_blsb)
+
+twoway_fert_corn_blsb_letters <- multcompLetters4(twoway_fert_corn_blsb, tukey_fert_corn_blsb)
+aov_fert_corn_blsb_letters <- multcompLetters4(aov_fert_corn_inter_blsb, tukey_fert_corn_inter_blsb)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_blsb <- predict(bestNormalize(summary_blsb$percent_incidence_blsb, out_of_sample = FALSE, loo = TRUE))
+blsb_joined_ev$trans_incidence_blsb <- predict(bestNormalize(blsb_joined_ev$incidence_blsb, out_of_sample = FALSE, loo = TRUE))
+
+
+blsb_ev <-
+  blsb_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_blsb = as.numeric(incidence_blsb))
+
+
+cor_blsb_wind_incidence <- cor(blsb_ev$mean_wind, blsb_ev$incidence_blsb, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blsb_temp_incidence <- cor(blsb_ev$mean_temp, blsb_ev$incidence_blsb, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blsb_humid_incidence <- cor(blsb_ev$mean_humid, blsb_ev$incidence_blsb, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blsb_rain_incidence <- cor(blsb_ev$mean_rain, blsb_ev$incidence_blsb, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_blsb  <- lm(incidence_blsb ~ mean_rain, data = blsb_joined_ev)
+lm_wind_blsb  <- lm(incidence_blsb ~ mean_wind, data = blsb_joined_ev)
+lm_humid_blsb <- lm(incidence_blsb ~ mean_humid, data = blsb_joined_ev)
+lm_temp_blsb  <- lm(incidence_blsb ~ mean_temp, data = blsb_joined_ev)
+
+
+temp_blsb_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_blsb)[1],
+    coef(lm_temp_blsb)[2],
+    round(cor_blsb_temp_incidence, 3)
+  )
+
+rain_blsb_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_blsb)[1],
+    coef(lm_rain_blsb)[2],
+    round(cor_blsb_rain_incidence, 3)
+  )
+
+
+wind_blsb_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_blsb)[1],
+    coef(lm_wind_blsb)[2],
+    round(cor_blsb_wind_incidence, 3)
+  )
+
+
+humid_blsb_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_blsb)[1],
+    coef(lm_humid_blsb)[2],
+    round(cor_blsb_humid_incidence, 3)
+  )
+
+
+blsb_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_blsb)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence BLSB",
+       title = "Temperature vs BLSB") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_blsb_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "BLSB vs Temp.png")
+
+
+blsb_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_blsb)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence BLSB",
+       title = "Wind Speed vs BLSB") +
+  annotate("label", x = 7, y = 11,  
+           label = wind_blsb_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "BLSB vs Wind.png")
+
+blsb_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_blsb)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence BLSB",
+       title = "Humidity vs BLSB") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_blsb_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "BLSB vs Humid.png")
+
+blsb_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_blsb)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence BLSB",
+       title = "Rainfall vs BLSB") +
+  annotate("label", x = 0.4, y = 13,  
+           label = rain_blsb_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "BLSB vs Rain.png")
+
+summary_blsb_corntype_bp <-
+  summary_blsb %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_blsb), sd = mean_sd(percent_incidence_blsb)) %>% 
+  arrange(desc(w))
+
+summary_blsb_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_blsb_letters$factor_corn)$Letters
+
+
+summary_blsb %>%
+  ggplot(aes(factor_corn, percent_incidence_blsb)) + 
+  geom_boxplot() +
+  geom_text(data = summary_blsb_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_blsb_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = -1.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence BLSB",
+       title = "Effect of Corn Type on BLSB Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Percent BLSB vs Corn Type.png")
+
+
+summary_blsb_fert_bp <-
+  summary_blsb %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_blsb), sd = mean_sd(percent_incidence_blsb)) %>% 
+  arrange(desc(w))
+
+summary_blsb_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_blsb_letters$order_treat)$Letters
+
+summary_blsb %>%
+  ggplot(aes(order_treat, percent_incidence_blsb)) + 
+  geom_boxplot() +
+  geom_text(data = summary_blsb_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_blsb_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = -1.2, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence BLSB",
+       title = "Effect of Fertilizer Treatment Rate on BLSB Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Percent BLSB vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Corn Rust```
+```{r}
+# Common Rust 
+rust_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Common Rust")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+rust_df_ev$collect_date <- 
+  as.Date(rust_df_ev$`Collection Date`, "%B %d, %Y")
+
+rust_dmg_ev <-
+  rust_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+rust_joined_ev <-
+  rust_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Common Rust")) == "0"),
+         sum_slight = sum(c_across(starts_with("Common Rust")) == "1"),
+         sum_light = sum(c_across(starts_with("Common Rust")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Common Rust")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Common Rust")) == "7"),
+         sum_very = sum(c_across(starts_with("Common Rust")) == "9"),
+         average_damage_rust = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_rust = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_rust = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(rust_joined_ev)
+
+
+summary_rust <-
+  rust_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_rust = n() * number_sampled_plants,
+            sum_avg_dmg_rust = sum(average_damage_rust),
+            sum_dmg_rate_rust = sum(damage_rating_rust),
+            sum_incidence_rust = sum(incidence_rust),
+            percent_incidence_rust = (sum_incidence_rust / total_count_samples_rust) * percent_100)
+
+View(summary_rust)
+
+summary_rust$order_treat <- ordered(summary_rust$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_rust$factor_corn <- factor(summary_rust$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_rust$percent_incidence_rust)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_rust <- ks.test(summary_rust$percent_incidence_rust, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_rust <- ad.test(summary_rust$percent_incidence_rust)
+
+skew_rust <- skewness(summary_rust$percent_incidence_rust)
+kurt_rust <- kurtosis(summary_rust$percent_incidence_rust)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_rust <- jarque.test(summary_rust$percent_incidence_rust)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_rust <- kruskal.test(percent_incidence_rust ~ order_treat, summary_rust)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_rust <- wilcox.test(percent_incidence_rust ~ factor_corn, summary_rust)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_rust <- summary_rust %>% friedman_test(percent_incidence_rust ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_rust <- leveneTest(percent_incidence_rust ~ Treatment, summary_rust)
+levenes_corntype_rust <- leveneTest(percent_incidence_rust ~ `Corn Type`, summary_rust)
+levenes_municipality_rust <- leveneTest(percent_incidence_rust ~ Municipality, summary_rust)
+levenes_province_rust <- leveneTest(percent_incidence_rust ~ Province, summary_rust)
+levenes_fert_corn_rust <- leveneTest(percent_incidence_rust ~ interaction(Treatment, `Corn Type`), summary_rust)
+
+
+# AnOVa
+aov_fert_rust <- aov(percent_incidence_rust ~ order_treat, summary_rust)
+aov_corn_rust <- aov(percent_incidence_rust ~ factor_corn, summary_rust) 
+ttest_corn_rust <- t.test(percent_incidence_rust ~ factor_corn, summary_rust)
+
+# Two way AnOVa
+twoway_fert_corn_rust <- aov(percent_incidence_rust ~ order_treat + factor_corn, summary_rust) 
+tukey_fert_corn_rust <- TukeyHSD(twoway_fert_corn_rust)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_rust <- aov(percent_incidence_rust ~ order_treat*factor_corn, summary_rust)
+tukey_fert_corn_inter_rust <- TukeyHSD(aov_fert_corn_inter_rust)
+
+aov_fert_rust %>% summary()
+aov_corn_rust %>% summary()
+ttest_corn_rust
+twoway_fert_corn_rust %>% summary()
+print(tukey_fert_corn_rust)
+aov_fert_corn_inter_rust %>% summary()
+print(tukey_fert_corn_inter_rust)
+
+twoway_fert_corn_rust_letters <- multcompLetters4(twoway_fert_corn_rust, tukey_fert_corn_rust)
+aov_fert_corn_rust_letters <- multcompLetters4(aov_fert_corn_inter_rust, tukey_fert_corn_inter_rust)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_rust <- predict(bestNormalize(summary_rust$percent_incidence_rust, out_of_sample = FALSE, loo = TRUE))
+rust_joined_ev$trans_incidence_rust <- predict(bestNormalize(rust_joined_ev$incidence_rust, out_of_sample = FALSE, loo = TRUE))
+
+
+rust_ev <-
+  rust_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_rust = as.numeric(incidence_rust))
+
+
+cor_rust_wind_incidence <- cor(rust_ev$mean_wind, rust_ev$incidence_rust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_rust_temp_incidence <- cor(rust_ev$mean_temp, rust_ev$incidence_rust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_rust_humid_incidence <- cor(rust_ev$mean_humid, rust_ev$incidence_rust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_rust_rain_incidence <- cor(rust_ev$mean_rain, rust_ev$incidence_rust, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_rust  <- lm(incidence_rust ~ mean_rain, data = rust_joined_ev)
+lm_wind_rust  <- lm(incidence_rust ~ mean_wind, data = rust_joined_ev)
+lm_humid_rust <- lm(incidence_rust ~ mean_humid, data = rust_joined_ev)
+lm_temp_rust  <- lm(incidence_rust ~ mean_temp, data = rust_joined_ev)
+
+
+temp_rust_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_rust)[1],
+    coef(lm_temp_rust)[2],
+    round(cor_rust_temp_incidence, 3)
+  )
+
+rain_rust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_rust)[1],
+    coef(lm_rain_rust)[2],
+    round(cor_rust_rain_incidence, 3)
+  )
+
+
+wind_rust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_rust)[1],
+    coef(lm_wind_rust)[2],
+    round(cor_rust_wind_incidence, 3)
+  )
+
+
+humid_rust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_rust)[1],
+    coef(lm_humid_rust)[2],
+    round(cor_rust_humid_incidence, 3)
+  )
+
+
+rust_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_rust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Common Rust",
+       title = "Temperature vs Common Rust") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_rust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Rust vs Temp.png")
+
+
+rust_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_rust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Common Rust",
+       title = "Wind Speed vs Common Rust") +
+  annotate("label", x = 7, y = 11,  
+           label = wind_rust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Rust vs Wind.png")
+
+rust_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_rust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Rust",
+       title = "Humidity vs Common Rust") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_rust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Rust vs Humid.png")
+
+rust_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_rust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Common Rust",
+       title = "Rainfall vs Common Rust") +
+  annotate("label", x = 0.4, y = 13,  
+           label = rain_rust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Rust vs Rain.png")
+
+summary_rust_corntype_bp <-
+  summary_rust %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_rust), sd = mean_sd(percent_incidence_rust)) %>% 
+  arrange(desc(w))
+
+summary_rust_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_rust_letters$factor_corn)$Letters
+
+
+summary_rust %>%
+  ggplot(aes(factor_corn, percent_incidence_rust)) + 
+  geom_boxplot() +
+  geom_text(data = summary_rust_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_rust_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = -1.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Common Rust",
+       title = "Effect of Corn Type on Common Rust Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Percent Rust vs Corn Type.png")
+
+
+summary_rust_fert_bp <-
+  summary_rust %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_rust), sd = mean_sd(percent_incidence_rust)) %>% 
+  arrange(desc(w))
+
+summary_rust_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_rust_letters$order_treat)$Letters
+
+summary_rust %>%
+  ggplot(aes(order_treat, percent_incidence_rust)) + 
+  geom_boxplot() +
+  geom_text(data = summary_rust_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_rust_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = -2, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Common Rust",
+       title = "Effect of Fertilizer Treatment Rate on Common Rust Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Percent Rust vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+
+```Southern Rust```
+```{r}
+# Southern Rust 
+southrust_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Southern Rust")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+southrust_df_ev$collect_date <- 
+  as.Date(southrust_df_ev$`Collection Date`, "%B %d, %Y")
+
+southrust_dmg_ev <-
+  southrust_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+southrust_joined_ev <-
+  southrust_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Southern Rust")) == "0"),
+         sum_slight = sum(c_across(starts_with("Southern Rust")) == "1"),
+         sum_light = sum(c_across(starts_with("Southern Rust")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Southern Rust")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Southern Rust")) == "7"),
+         sum_very = sum(c_across(starts_with("Southern Rust")) == "9"),
+         average_damage_southrust = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_southrust = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_southrust = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(southrust_joined_ev)
+
+
+summary_southrust <-
+  southrust_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_southrust = n() * number_sampled_plants,
+            sum_avg_dmg_southrust = sum(average_damage_southrust),
+            sum_dmg_rate_southrust = sum(damage_rating_southrust),
+            sum_incidence_southrust = sum(incidence_southrust),
+            percent_incidence_southrust = (sum_incidence_southrust / total_count_samples_southrust) * percent_100)
+
+View(summary_southrust)
+
+summary_southrust$order_treat <- ordered(summary_southrust$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_southrust$factor_corn <- factor(summary_southrust$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_southrust$percent_incidence_southrust)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_southrust <- ks.test(summary_southrust$percent_incidence_southrust, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_southrust <- ad.test(summary_southrust$percent_incidence_southrust)
+
+skew_southrust <- skewness(summary_southrust$percent_incidence_southrust)
+kurt_southrust <- kurtosis(summary_southrust$percent_incidence_southrust)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_southrust <- jarque.test(summary_southrust$percent_incidence_southrust)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_southrust <- kruskal.test(percent_incidence_southrust ~ order_treat, summary_southrust)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_southrust <- wilcox.test(percent_incidence_southrust ~ factor_corn, summary_southrust)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_southrust <- summary_southrust %>% friedman_test(percent_incidence_southrust ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_southrust <- leveneTest(percent_incidence_southrust ~ Treatment, summary_southrust)
+levenes_corntype_southrust <- leveneTest(percent_incidence_southrust ~ `Corn Type`, summary_southrust)
+levenes_municipality_southrust <- leveneTest(percent_incidence_southrust ~ Municipality, summary_southrust)
+levenes_province_southrust <- leveneTest(percent_incidence_southrust ~ Province, summary_southrust)
+levenes_fert_corn_southrust <- leveneTest(percent_incidence_southrust ~ interaction(Treatment, `Corn Type`), summary_southrust)
+
+
+# AnOVa
+aov_fert_southrust <- aov(percent_incidence_southrust ~ order_treat, summary_southrust)
+aov_corn_southrust <- aov(percent_incidence_southrust ~ factor_corn, summary_southrust) 
+ttest_corn_southrust <- t.test(percent_incidence_southrust ~ factor_corn, summary_southrust)
+
+# Two way AnOVa
+twoway_fert_corn_southrust <- aov(percent_incidence_southrust ~ order_treat + factor_corn, summary_southrust) 
+tukey_fert_corn_southrust <- TukeyHSD(twoway_fert_corn_southrust)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_southrust <- aov(percent_incidence_southrust ~ order_treat*factor_corn, summary_southrust)
+tukey_fert_corn_inter_southrust <- TukeyHSD(aov_fert_corn_inter_southrust)
+
+aov_fert_southrust %>% summary()
+aov_corn_southrust %>% summary()
+ttest_corn_southrust
+twoway_fert_corn_southrust %>% summary()
+print(tukey_fert_corn_southrust)
+aov_fert_corn_inter_southrust %>% summary()
+print(tukey_fert_corn_inter_southrust)
+
+twoway_fert_corn_southrust_letters <- multcompLetters4(twoway_fert_corn_southrust, tukey_fert_corn_southrust)
+aov_fert_corn_southrust_letters <- multcompLetters4(aov_fert_corn_inter_southrust, tukey_fert_corn_inter_southrust)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_southrust <- predict(bestNormalize(summary_southrust$percent_incidence_southrust, out_of_sample = FALSE, loo = TRUE))
+southrust_joined_ev$trans_incidence_southrust <- predict(bestNormalize(southrust_joined_ev$incidence_southrust, out_of_sample = FALSE, loo = TRUE))
+
+
+southrust_ev <-
+  southrust_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_southrust = as.numeric(incidence_southrust))
+
+
+cor_southrust_wind_incidence <- cor(southrust_ev$mean_wind, southrust_ev$incidence_southrust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_southrust_temp_incidence <- cor(southrust_ev$mean_temp, southrust_ev$incidence_southrust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_southrust_humid_incidence <- cor(southrust_ev$mean_humid, southrust_ev$incidence_southrust, method = "pearson", use = "pairwise.complete.obs")
+
+cor_southrust_rain_incidence <- cor(southrust_ev$mean_rain, southrust_ev$incidence_southrust, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_southrust  <- lm(incidence_southrust ~ mean_rain, data = southrust_joined_ev)
+lm_wind_southrust  <- lm(incidence_southrust ~ mean_wind, data = southrust_joined_ev)
+lm_humid_southrust <- lm(incidence_southrust ~ mean_humid, data = southrust_joined_ev)
+lm_temp_southrust  <- lm(incidence_southrust ~ mean_temp, data = southrust_joined_ev)
+
+
+temp_southrust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_southrust)[1],
+    coef(lm_temp_southrust)[2],
+    round(cor_southrust_temp_incidence, 3)
+  )
+
+rain_southrust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_southrust)[1],
+    coef(lm_rain_southrust)[2],
+    round(cor_southrust_rain_incidence, 3)
+  )
+
+
+wind_southrust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_southrust)[1],
+    coef(lm_wind_southrust)[2],
+    round(cor_southrust_wind_incidence, 3)
+  )
+
+
+humid_southrust_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_southrust)[1],
+    coef(lm_humid_southrust)[2],
+    round(cor_southrust_humid_incidence, 3)
+  )
+
+
+southrust_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_southrust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Southern Rust",
+       title = "Temperature vs Soutern Rust") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_southrust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust vs Temp.png")
+
+
+southrust_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_southrust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Southern Rust",
+       title = "Wind Speed vs Soutern Rust") +
+  annotate("label", x = 7, y = 11,  
+           label = wind_southrust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust vs Wind.png")
+
+southrust_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_southrust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Southern Rust",
+       title = "Humidity vs Soutern Rust") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_southrust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust vs Humid.png")
+
+southrust_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_southrust)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Southern Rust",
+       title = "Rainfall vs Soutern Rust") +
+  annotate("label", x = 0.4, y = 13,  
+           label = rain_southrust_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust vs Rain.png")
+
+summary_southrust_corntype_bp <-
+  summary_southrust %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_southrust), sd = mean_sd(percent_incidence_southrust)) %>% 
+  arrange(desc(w))
+
+summary_southrust_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_southrust_letters$factor_corn)$Letters
+
+
+summary_southrust %>%
+  ggplot(aes(factor_corn, percent_incidence_southrust)) + 
+  geom_boxplot() +
+  geom_text(data = summary_southrust_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_southrust_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Southern Rust",
+       title = "Effect of Corn Type on Southern Rust Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust Percent Incidence vs Corn Type.png")
+
+
+summary_southrust_fert_bp <-
+  summary_southrust %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_southrust), sd = mean_sd(percent_incidence_southrust)) %>% 
+  arrange(desc(w))
+
+summary_southrust_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_southrust_letters$order_treat)$Letters
+
+summary_southrust %>%
+  ggplot(aes(order_treat, percent_incidence_southrust)) + 
+  geom_boxplot() +
+  geom_text(data = summary_southrust_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_southrust_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Southern Rust",
+       title = "Effect of Fertilizer Treatment Rate on Southern Rust Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Southern Rust Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Downy Mildew```
+```{r}
+# Downy Mildew 
+mildew_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Downy Mildew")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+mildew_df_ev$collect_date <- 
+  as.Date(mildew_df_ev$`Collection Date`, "%B %d, %Y")
+
+mildew_dmg_ev <-
+  mildew_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+mildew_joined_ev <-
+  mildew_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Downy Mildew")) == "0"),
+         sum_slight = sum(c_across(starts_with("Downy Mildew")) == "1"),
+         sum_light = sum(c_across(starts_with("Downy Mildew")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Downy Mildew")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Downy Mildew")) == "7"),
+         sum_very = sum(c_across(starts_with("Downy Mildew")) == "9"),
+         average_damage_mildew = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_mildew = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_mildew = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(mildew_joined_ev)
+
+
+summary_mildew <-
+  mildew_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_mildew = n() * number_sampled_plants,
+            sum_avg_dmg_mildew = sum(average_damage_mildew),
+            sum_dmg_rate_mildew = sum(damage_rating_mildew),
+            sum_incidence_mildew = sum(incidence_mildew),
+            percent_incidence_mildew = (sum_incidence_mildew / total_count_samples_mildew) * percent_100)
+
+View(summary_mildew)
+
+summary_mildew$order_treat <- ordered(summary_mildew$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_mildew$factor_corn <- factor(summary_mildew$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_mildew$percent_incidence_mildew)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_mildew <- ks.test(summary_mildew$percent_incidence_mildew, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_mildew <- ad.test(summary_mildew$percent_incidence_mildew)
+
+skew_mildew <- skewness(summary_mildew$percent_incidence_mildew)
+kurt_mildew <- kurtosis(summary_mildew$percent_incidence_mildew)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_mildew <- jarque.test(summary_mildew$percent_incidence_mildew)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_mildew <- kruskal.test(percent_incidence_mildew ~ order_treat, summary_mildew)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_mildew <- wilcox.test(percent_incidence_mildew ~ factor_corn, summary_mildew)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_mildew <- summary_mildew %>% friedman_test(percent_incidence_mildew ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_mildew <- leveneTest(percent_incidence_mildew ~ Treatment, summary_mildew)
+levenes_corntype_mildew <- leveneTest(percent_incidence_mildew ~ `Corn Type`, summary_mildew)
+levenes_municipality_mildew <- leveneTest(percent_incidence_mildew ~ Municipality, summary_mildew)
+levenes_province_mildew <- leveneTest(percent_incidence_mildew ~ Province, summary_mildew)
+levenes_fert_corn_mildew <- leveneTest(percent_incidence_mildew ~ interaction(Treatment, `Corn Type`), summary_mildew)
+
+
+# AnOVa
+aov_fert_mildew <- aov(percent_incidence_mildew ~ order_treat, summary_mildew)
+aov_corn_mildew <- aov(percent_incidence_mildew ~ factor_corn, summary_mildew) 
+ttest_corn_mildew <- t.test(percent_incidence_mildew ~ factor_corn, summary_mildew)
+
+# Two way AnOVa
+twoway_fert_corn_mildew <- aov(percent_incidence_mildew ~ order_treat + factor_corn, summary_mildew) 
+tukey_fert_corn_mildew <- TukeyHSD(twoway_fert_corn_mildew)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_mildew <- aov(percent_incidence_mildew ~ order_treat*factor_corn, summary_mildew)
+tukey_fert_corn_inter_mildew <- TukeyHSD(aov_fert_corn_inter_mildew)
+
+aov_fert_mildew %>% summary()
+aov_corn_mildew %>% summary()
+ttest_corn_mildew
+twoway_fert_corn_mildew %>% summary()
+print(tukey_fert_corn_mildew)
+aov_fert_corn_inter_mildew %>% summary()
+print(tukey_fert_corn_inter_mildew)
+
+twoway_fert_corn_mildew_letters <- multcompLetters4(twoway_fert_corn_mildew, tukey_fert_corn_mildew)
+aov_fert_corn_mildew_letters <- multcompLetters4(aov_fert_corn_inter_mildew, tukey_fert_corn_inter_mildew)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_mildew <- predict(bestNormalize(summary_mildew$percent_incidence_mildew, out_of_sample = FALSE, loo = TRUE))
+mildew_joined_ev$trans_incidence_mildew <- predict(bestNormalize(mildew_joined_ev$incidence_mildew, out_of_sample = FALSE, loo = TRUE))
+
+
+mildew_ev <-
+  mildew_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_mildew = as.numeric(incidence_mildew))
+
+
+cor_mildew_wind_incidence <- cor(mildew_ev$mean_wind, mildew_ev$incidence_mildew, method = "pearson", use = "pairwise.complete.obs")
+
+cor_mildew_temp_incidence <- cor(mildew_ev$mean_temp, mildew_ev$incidence_mildew, method = "pearson", use = "pairwise.complete.obs")
+
+cor_mildew_humid_incidence <- cor(mildew_ev$mean_humid, mildew_ev$incidence_mildew, method = "pearson", use = "pairwise.complete.obs")
+
+cor_mildew_rain_incidence <- cor(mildew_ev$mean_rain, mildew_ev$incidence_mildew, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_mildew  <- lm(incidence_mildew ~ mean_rain, data = mildew_joined_ev)
+lm_wind_mildew  <- lm(incidence_mildew ~ mean_wind, data = mildew_joined_ev)
+lm_humid_mildew <- lm(incidence_mildew ~ mean_humid, data = mildew_joined_ev)
+lm_temp_mildew  <- lm(incidence_mildew ~ mean_temp, data = mildew_joined_ev)
+
+
+temp_mildew_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_mildew)[1],
+    coef(lm_temp_mildew)[2],
+    round(cor_mildew_temp_incidence, 3)
+  )
+
+rain_mildew_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_mildew)[1],
+    coef(lm_rain_mildew)[2],
+    round(cor_mildew_rain_incidence, 3)
+  )
+
+
+wind_mildew_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_mildew)[1],
+    coef(lm_wind_mildew)[2],
+    round(cor_mildew_wind_incidence, 3)
+  )
+
+
+humid_mildew_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_mildew)[1],
+    coef(lm_humid_mildew)[2],
+    round(cor_mildew_humid_incidence, 3)
+  )
+
+
+mildew_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_mildew)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Downy Mildew",
+       title = "Temperature vs Downy Mildew") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_mildew_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew vs Temp.png")
+
+
+mildew_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_mildew)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Downy Mildew",
+       title = "Wind Speed vs Downy Mildew") +
+  annotate("label", x = 7, y = 11,  
+           label = wind_mildew_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew vs Wind.png")
+
+mildew_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_mildew)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Downy Mildew",
+       title = "Humidity vs Downy Mildew") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_mildew_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew vs Humid.png")
+
+mildew_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_mildew)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Downy Mildew",
+       title = "Rainfall vs Downy Mildew") +
+  annotate("label", x = 0.4, y = 13,  
+           label = rain_mildew_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew vs Rain.png")
+
+summary_mildew_corntype_bp <-
+  summary_mildew %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_mildew), sd = mean_sd(percent_incidence_mildew)) %>% 
+  arrange(desc(w))
+
+summary_mildew_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_mildew_letters$factor_corn)$Letters
+
+
+summary_mildew %>%
+  ggplot(aes(factor_corn, percent_incidence_mildew)) + 
+  geom_boxplot() +
+  geom_text(data = summary_mildew_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_mildew_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Downy Mildew",
+       title = "Effect of Corn Type on Downy Mildew Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew Percent Incidence vs Corn Type.png")
+
+
+summary_mildew_fert_bp <-
+  summary_mildew %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_mildew), sd = mean_sd(percent_incidence_mildew)) %>% 
+  arrange(desc(w))
+
+summary_mildew_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_mildew_letters$order_treat)$Letters
+
+summary_mildew %>%
+  ggplot(aes(order_treat, percent_incidence_mildew)) + 
+  geom_boxplot() +
+  geom_text(data = summary_mildew_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_mildew_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Downy Mildew",
+       title = "Effect of Fertilizer Treatment Rate on Downy Mildew Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Downy Mildew Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Brown Spot```
+```{r}
+# Brown Spot 
+brown_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Brown Spot")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+brown_df_ev$collect_date <- 
+  as.Date(brown_df_ev$`Collection Date`, "%B %d, %Y")
+
+brown_dmg_ev <-
+  brown_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+brown_joined_ev <-
+  brown_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Brown Spot")) == "0"),
+         sum_slight = sum(c_across(starts_with("Brown Spot")) == "1"),
+         sum_light = sum(c_across(starts_with("Brown Spot")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Brown Spot")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Brown Spot")) == "7"),
+         sum_very = sum(c_across(starts_with("Brown Spot")) == "9"),
+         average_damage_brown = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_brown = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_brown = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(brown_joined_ev)
+
+
+summary_brown <-
+  brown_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_brown = n() * number_sampled_plants,
+            sum_avg_dmg_brown = sum(average_damage_brown),
+            sum_dmg_rate_brown = sum(damage_rating_brown),
+            sum_incidence_brown = sum(incidence_brown),
+            percent_incidence_brown = (sum_incidence_brown / total_count_samples_brown) * percent_100)
+
+View(summary_brown)
+
+summary_brown$order_treat <- ordered(summary_brown$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_brown$factor_corn <- factor(summary_brown$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_brown$percent_incidence_brown)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_brown <- ks.test(summary_brown$percent_incidence_brown, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_brown <- ad.test(summary_brown$percent_incidence_brown)
+
+skew_brown <- skewness(summary_brown$percent_incidence_brown)
+kurt_brown <- kurtosis(summary_brown$percent_incidence_brown)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_brown <- jarque.test(summary_brown$percent_incidence_brown)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_brown <- kruskal.test(percent_incidence_brown ~ order_treat, summary_brown)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_brown <- wilcox.test(percent_incidence_brown ~ factor_corn, summary_brown)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_brown <- summary_brown %>% friedman_test(percent_incidence_brown ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_brown <- leveneTest(percent_incidence_brown ~ Treatment, summary_brown)
+levenes_corntype_brown <- leveneTest(percent_incidence_brown ~ `Corn Type`, summary_brown)
+levenes_municipality_brown <- leveneTest(percent_incidence_brown ~ Municipality, summary_brown)
+levenes_province_brown <- leveneTest(percent_incidence_brown ~ Province, summary_brown)
+levenes_fert_corn_brown <- leveneTest(percent_incidence_brown ~ interaction(Treatment, `Corn Type`), summary_brown)
+
+
+# AnOVa
+aov_fert_brown <- aov(percent_incidence_brown ~ order_treat, summary_brown)
+aov_corn_brown <- aov(percent_incidence_brown ~ factor_corn, summary_brown) 
+ttest_corn_brown <- t.test(percent_incidence_brown ~ factor_corn, summary_brown)
+
+# Two way AnOVa
+twoway_fert_corn_brown <- aov(percent_incidence_brown ~ order_treat + factor_corn, summary_brown) 
+tukey_fert_corn_brown <- TukeyHSD(twoway_fert_corn_brown)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_brown <- aov(percent_incidence_brown ~ order_treat*factor_corn, summary_brown)
+tukey_fert_corn_inter_brown <- TukeyHSD(aov_fert_corn_inter_brown)
+
+aov_fert_brown %>% summary()
+aov_corn_brown %>% summary()
+ttest_corn_brown
+twoway_fert_corn_brown %>% summary()
+print(tukey_fert_corn_brown)
+aov_fert_corn_inter_brown %>% summary()
+print(tukey_fert_corn_inter_brown)
+
+twoway_fert_corn_brown_letters <- multcompLetters4(twoway_fert_corn_brown, tukey_fert_corn_brown)
+aov_fert_corn_brown_letters <- multcompLetters4(aov_fert_corn_inter_brown, tukey_fert_corn_inter_brown)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_brown <- predict(bestNormalize(summary_brown$percent_incidence_brown, out_of_sample = FALSE, loo = TRUE))
+brown_joined_ev$trans_incidence_brown <- predict(bestNormalize(brown_joined_ev$incidence_brown, out_of_sample = FALSE, loo = TRUE))
+
+
+brown_ev <-
+  brown_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_brown = as.numeric(incidence_brown))
+
+
+cor_brown_wind_incidence <- cor(brown_ev$mean_wind, brown_ev$incidence_brown, method = "pearson", use = "pairwise.complete.obs")
+
+cor_brown_temp_incidence <- cor(brown_ev$mean_temp, brown_ev$incidence_brown, method = "pearson", use = "pairwise.complete.obs")
+
+cor_brown_humid_incidence <- cor(brown_ev$mean_humid, brown_ev$incidence_brown, method = "pearson", use = "pairwise.complete.obs")
+
+cor_brown_rain_incidence <- cor(brown_ev$mean_rain, brown_ev$incidence_brown, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_brown  <- lm(incidence_brown ~ mean_rain, data = brown_joined_ev)
+lm_wind_brown  <- lm(incidence_brown ~ mean_wind, data = brown_joined_ev)
+lm_humid_brown <- lm(incidence_brown ~ mean_humid, data = brown_joined_ev)
+lm_temp_brown  <- lm(incidence_brown ~ mean_temp, data = brown_joined_ev)
+
+
+temp_brown_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_brown)[1],
+    coef(lm_temp_brown)[2],
+    round(cor_brown_temp_incidence, 3)
+  )
+
+rain_brown_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_brown)[1],
+    coef(lm_rain_brown)[2],
+    round(cor_brown_rain_incidence, 3)
+  )
+
+
+wind_brown_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_brown)[1],
+    coef(lm_wind_brown)[2],
+    round(cor_brown_wind_incidence, 3)
+  )
+
+
+humid_brown_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_brown)[1],
+    coef(lm_humid_brown)[2],
+    round(cor_brown_humid_incidence, 3)
+  )
+
+
+brown_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_brown)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Brown Spot",
+       title = "Temperature vs Brown Spot") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_brown_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot vs Temp.png")
+
+
+brown_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_brown)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Brown Spot",
+       title = "Wind Speed vs Brown Spot") +
+  annotate("label", x = 8, y = 11,  
+           label = wind_brown_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot vs Wind.png")
+
+brown_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_brown)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Brown Spot",
+       title = "Humidity vs Brown Spot") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_brown_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot vs Humid.png")
+
+brown_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_brown)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Brown Spot",
+       title = "Rainfall vs Brown Spot") +
+  annotate("label", x = 0.4, y = 13,  
+           label = rain_brown_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot vs Rain.png")
+
+summary_brown_corntype_bp <-
+  summary_brown %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_brown), sd = mean_sd(percent_incidence_brown)) %>% 
+  arrange(desc(w))
+
+summary_brown_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_brown_letters$factor_corn)$Letters
+
+
+summary_brown %>%
+  ggplot(aes(factor_corn, percent_incidence_brown)) + 
+  geom_boxplot() +
+  geom_text(data = summary_brown_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_brown_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Brown Spot",
+       title = "Effect of Corn Type on Brown Spot Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot Percent Incidence vs Corn Type.png")
+
+
+summary_brown_fert_bp <-
+  summary_brown %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_brown), sd = mean_sd(percent_incidence_brown)) %>% 
+  arrange(desc(w))
+
+summary_brown_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_brown_letters$order_treat)$Letters
+
+summary_brown %>%
+  ggplot(aes(order_treat, percent_incidence_brown)) + 
+  geom_boxplot() +
+  geom_text(data = summary_brown_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_brown_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Brown Spot",
+       title = "Effect of Fertilizer Treatment Rate on Brown Spot Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Brown Spot Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Leaf Spot```
+```{r}
+# Leaf Spot 
+leaf_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Leaf Spot")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+leaf_df_ev$collect_date <- 
+  as.Date(leaf_df_ev$`Collection Date`, "%B %d, %Y")
+
+leaf_dmg_ev <-
+  leaf_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+leaf_joined_ev <-
+  leaf_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Leaf Spot")) == "0"),
+         sum_slight = sum(c_across(starts_with("Leaf Spot")) == "1"),
+         sum_light = sum(c_across(starts_with("Leaf Spot")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Leaf Spot")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Leaf Spot")) == "7"),
+         sum_very = sum(c_across(starts_with("Leaf Spot")) == "9"),
+         average_damage_leaf = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_leaf = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_leaf = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(leaf_joined_ev)
+
+
+summary_leaf <-
+  leaf_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_leaf = n() * number_sampled_plants,
+            sum_avg_dmg_leaf = sum(average_damage_leaf),
+            sum_dmg_rate_leaf = sum(damage_rating_leaf),
+            sum_incidence_leaf = sum(incidence_leaf),
+            percent_incidence_leaf = (sum_incidence_leaf / total_count_samples_leaf) * percent_100)
+
+View(summary_leaf)
+
+summary_leaf$order_treat <- ordered(summary_leaf$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_leaf$factor_corn <- factor(summary_leaf$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_leaf$percent_incidence_leaf)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_leaf <- ks.test(summary_leaf$percent_incidence_leaf, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_leaf <- ad.test(summary_leaf$percent_incidence_leaf)
+
+skew_leaf <- skewness(summary_leaf$percent_incidence_leaf)
+kurt_leaf <- kurtosis(summary_leaf$percent_incidence_leaf)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_leaf <- jarque.test(summary_leaf$percent_incidence_leaf)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_leaf <- kruskal.test(percent_incidence_leaf ~ order_treat, summary_leaf)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_leaf <- wilcox.test(percent_incidence_leaf ~ factor_corn, summary_leaf)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_leaf <- summary_leaf %>% friedman_test(percent_incidence_leaf ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_leaf <- leveneTest(percent_incidence_leaf ~ Treatment, summary_leaf)
+levenes_corntype_leaf <- leveneTest(percent_incidence_leaf ~ `Corn Type`, summary_leaf)
+levenes_municipality_leaf <- leveneTest(percent_incidence_leaf ~ Municipality, summary_leaf)
+levenes_province_leaf <- leveneTest(percent_incidence_leaf ~ Province, summary_leaf)
+levenes_fert_corn_leaf <- leveneTest(percent_incidence_leaf ~ interaction(Treatment, `Corn Type`), summary_leaf)
+
+
+# AnOVa
+aov_fert_leaf <- aov(percent_incidence_leaf ~ order_treat, summary_leaf)
+aov_corn_leaf <- aov(percent_incidence_leaf ~ factor_corn, summary_leaf) 
+ttest_corn_leaf <- t.test(percent_incidence_leaf ~ factor_corn, summary_leaf)
+
+# Two way AnOVa
+twoway_fert_corn_leaf <- aov(percent_incidence_leaf ~ order_treat + factor_corn, summary_leaf) 
+tukey_fert_corn_leaf <- TukeyHSD(twoway_fert_corn_leaf)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_leaf <- aov(percent_incidence_leaf ~ order_treat*factor_corn, summary_leaf)
+tukey_fert_corn_inter_leaf <- TukeyHSD(aov_fert_corn_inter_leaf)
+
+aov_fert_leaf %>% summary()
+aov_corn_leaf %>% summary()
+ttest_corn_leaf
+twoway_fert_corn_leaf %>% summary()
+print(tukey_fert_corn_leaf)
+aov_fert_corn_inter_leaf %>% summary()
+print(tukey_fert_corn_inter_leaf)
+
+twoway_fert_corn_leaf_letters <- multcompLetters4(twoway_fert_corn_leaf, tukey_fert_corn_leaf)
+aov_fert_corn_leaf_letters <- multcompLetters4(aov_fert_corn_inter_leaf, tukey_fert_corn_inter_leaf)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_leaf <- predict(bestNormalize(summary_leaf$percent_incidence_leaf, out_of_sample = FALSE, loo = TRUE))
+leaf_joined_ev$trans_incidence_leaf <- predict(bestNormalize(leaf_joined_ev$incidence_leaf, out_of_sample = FALSE, loo = TRUE))
+
+
+leaf_ev <-
+  leaf_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_leaf = as.numeric(incidence_leaf))
+
+
+cor_leaf_wind_incidence <- cor(leaf_ev$mean_wind, leaf_ev$incidence_leaf, method = "pearson", use = "pairwise.complete.obs")
+
+cor_leaf_temp_incidence <- cor(leaf_ev$mean_temp, leaf_ev$incidence_leaf, method = "pearson", use = "pairwise.complete.obs")
+
+cor_leaf_humid_incidence <- cor(leaf_ev$mean_humid, leaf_ev$incidence_leaf, method = "pearson", use = "pairwise.complete.obs")
+
+cor_leaf_rain_incidence <- cor(leaf_ev$mean_rain, leaf_ev$incidence_leaf, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_leaf  <- lm(incidence_leaf ~ mean_rain, data = leaf_joined_ev)
+lm_wind_leaf  <- lm(incidence_leaf ~ mean_wind, data = leaf_joined_ev)
+lm_humid_leaf <- lm(incidence_leaf ~ mean_humid, data = leaf_joined_ev)
+lm_temp_leaf  <- lm(incidence_leaf ~ mean_temp, data = leaf_joined_ev)
+
+
+temp_leaf_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_leaf)[1],
+    coef(lm_temp_leaf)[2],
+    round(cor_leaf_temp_incidence, 3)
+  )
+
+rain_leaf_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_leaf)[1],
+    coef(lm_rain_leaf)[2],
+    round(cor_leaf_rain_incidence, 3)
+  )
+
+
+wind_leaf_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_leaf)[1],
+    coef(lm_wind_leaf)[2],
+    round(cor_leaf_wind_incidence, 3)
+  )
+
+
+humid_leaf_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_leaf)[1],
+    coef(lm_humid_leaf)[2],
+    round(cor_leaf_humid_incidence, 3)
+  )
+
+
+leaf_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_leaf)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Leaf Spot",
+       title = "Temperature vs Leaf Spot") +
+  annotate("label", x = 27.5, y = 13,  
+           label = temp_leaf_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot vs Temp.png")
+
+
+leaf_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_leaf)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Leaf Spot",
+       title = "Wind Speed vs Leaf Spot") +
+  annotate("label", x = 7, y = 13,  
+           label = wind_leaf_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot vs Wind.png")
+
+leaf_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_leaf)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Leaf Spot",
+       title = "Humidity vs Leaf Spot") +
+  annotate("label", x = 60, y = 13,  
+           label = humid_leaf_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot vs Humid.png")
+
+leaf_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_leaf)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Leaf Spot",
+       title = "Rainfall vs Leaf Spot") +
+  annotate("label", x = 0.4, y = 15,  
+           label = rain_leaf_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot vs Rain.png")
+
+summary_leaf_corntype_bp <-
+  summary_leaf %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_leaf), sd = mean_sd(percent_incidence_leaf)) %>% 
+  arrange(desc(w))
+
+summary_leaf_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_leaf_letters$factor_corn)$Letters
+
+
+summary_leaf %>%
+  ggplot(aes(factor_corn, percent_incidence_leaf)) + 
+  geom_boxplot() +
+  geom_text(data = summary_leaf_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_leaf_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Leaf Spot",
+       title = "Effect of Corn Type on Leaf Spot Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot Percent Incidence vs Corn Type.png")
+
+
+summary_leaf_fert_bp <-
+  summary_leaf %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_leaf), sd = mean_sd(percent_incidence_leaf)) %>% 
+  arrange(desc(w))
+
+summary_leaf_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_leaf_letters$order_treat)$Letters
+
+summary_leaf %>%
+  ggplot(aes(order_treat, percent_incidence_leaf)) + 
+  geom_boxplot() +
+  geom_text(data = summary_leaf_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_leaf_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Leaf Spot",
+       title = "Effect of Fertilizer Treatment Rate on Leaf Spot Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Spot Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Leaf Blight```
+```{r}
+# Leaf Blight 
+blight_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Leaf Blight")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+blight_df_ev$collect_date <- 
+  as.Date(blight_df_ev$`Collection Date`, "%B %d, %Y")
+
+blight_dmg_ev <-
+  blight_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+blight_joined_ev <-
+  blight_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Leaf Blight")) == "0"),
+         sum_slight = sum(c_across(starts_with("Leaf Blight")) == "1"),
+         sum_light = sum(c_across(starts_with("Leaf Blight")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Leaf Blight")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Leaf Blight")) == "7"),
+         sum_very = sum(c_across(starts_with("Leaf Blight")) == "9"),
+         average_damage_blight = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_blight = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_blight = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(blight_joined_ev)
+
+
+summary_blight <-
+  blight_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_blight = n() * number_sampled_plants,
+            sum_avg_dmg_blight = sum(average_damage_blight),
+            sum_dmg_rate_blight = sum(damage_rating_blight),
+            sum_incidence_blight = sum(incidence_blight),
+            percent_incidence_blight = (sum_incidence_blight / total_count_samples_blight) * percent_100)
+
+View(summary_blight)
+
+summary_blight$order_treat <- ordered(summary_blight$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_blight$factor_corn <- factor(summary_blight$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_blight$percent_incidence_blight)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_blight <- ks.test(summary_blight$percent_incidence_blight, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_blight <- ad.test(summary_blight$percent_incidence_blight)
+
+skew_blight <- skewness(summary_blight$percent_incidence_blight)
+kurt_blight <- kurtosis(summary_blight$percent_incidence_blight)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_blight <- jarque.test(summary_blight$percent_incidence_blight)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_blight <- kruskal.test(percent_incidence_blight ~ order_treat, summary_blight)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_blight <- wilcox.test(percent_incidence_blight ~ factor_corn, summary_blight)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_blight <- summary_blight %>% friedman_test(percent_incidence_blight ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_blight <- leveneTest(percent_incidence_blight ~ Treatment, summary_blight)
+levenes_corntype_blight <- leveneTest(percent_incidence_blight ~ `Corn Type`, summary_blight)
+levenes_municipality_blight <- leveneTest(percent_incidence_blight ~ Municipality, summary_blight)
+levenes_province_blight <- leveneTest(percent_incidence_blight ~ Province, summary_blight)
+levenes_fert_corn_blight <- leveneTest(percent_incidence_blight ~ interaction(Treatment, `Corn Type`), summary_blight)
+
+
+# AnOVa
+aov_fert_blight <- aov(percent_incidence_blight ~ order_treat, summary_blight)
+aov_corn_blight <- aov(percent_incidence_blight ~ factor_corn, summary_blight) 
+ttest_corn_blight <- t.test(percent_incidence_blight ~ factor_corn, summary_blight)
+
+# Two way AnOVa
+twoway_fert_corn_blight <- aov(percent_incidence_blight ~ order_treat + factor_corn, summary_blight) 
+tukey_fert_corn_blight <- TukeyHSD(twoway_fert_corn_blight)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_blight <- aov(percent_incidence_blight ~ order_treat*factor_corn, summary_blight)
+tukey_fert_corn_inter_blight <- TukeyHSD(aov_fert_corn_inter_blight)
+
+aov_fert_blight %>% summary()
+aov_corn_blight %>% summary()
+ttest_corn_blight
+twoway_fert_corn_blight %>% summary()
+print(tukey_fert_corn_blight)
+aov_fert_corn_inter_blight %>% summary()
+print(tukey_fert_corn_inter_blight)
+
+twoway_fert_corn_blight_letters <- multcompLetters4(twoway_fert_corn_blight, tukey_fert_corn_blight)
+aov_fert_corn_blight_letters <- multcompLetters4(aov_fert_corn_inter_blight, tukey_fert_corn_inter_blight)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_blight <- predict(bestNormalize(summary_blight$percent_incidence_blight, out_of_sample = FALSE, loo = TRUE))
+blight_joined_ev$trans_incidence_blight <- predict(bestNormalize(blight_joined_ev$incidence_blight, out_of_sample = FALSE, loo = TRUE))
+
+
+blight_ev <-
+  blight_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_blight = as.numeric(incidence_blight))
+
+
+cor_blight_wind_incidence <- cor(blight_ev$mean_wind, blight_ev$incidence_blight, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blight_temp_incidence <- cor(blight_ev$mean_temp, blight_ev$incidence_blight, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blight_humid_incidence <- cor(blight_ev$mean_humid, blight_ev$incidence_blight, method = "pearson", use = "pairwise.complete.obs")
+
+cor_blight_rain_incidence <- cor(blight_ev$mean_rain, blight_ev$incidence_blight, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_blight  <- lm(incidence_blight ~ mean_rain, data = blight_joined_ev)
+lm_wind_blight  <- lm(incidence_blight ~ mean_wind, data = blight_joined_ev)
+lm_humid_blight <- lm(incidence_blight ~ mean_humid, data = blight_joined_ev)
+lm_temp_blight  <- lm(incidence_blight ~ mean_temp, data = blight_joined_ev)
+
+
+temp_blight_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_blight)[1],
+    coef(lm_temp_blight)[2],
+    round(cor_blight_temp_incidence, 3)
+  )
+
+rain_blight_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_blight)[1],
+    coef(lm_rain_blight)[2],
+    round(cor_blight_rain_incidence, 3)
+  )
+
+
+wind_blight_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_blight)[1],
+    coef(lm_wind_blight)[2],
+    round(cor_blight_wind_incidence, 3)
+  )
+
+
+humid_blight_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_blight)[1],
+    coef(lm_humid_blight)[2],
+    round(cor_blight_humid_incidence, 3)
+  )
+
+
+blight_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_blight)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Leaf Blight",
+       title = "Temperature vs Leaf Blight") +
+  annotate("label", x = 27.5, y = 9,  
+           label = temp_blight_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight vs Temp.png")
+
+
+blight_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_blight)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Leaf Blight",
+       title = "Wind Speed vs Leaf Blight") +
+  annotate("label", x = 8, y = 9,  
+           label = wind_blight_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight vs Wind.png")
+
+blight_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_blight)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Leaf Blight",
+       title = "Humidity vs Leaf Blight") +
+  annotate("label", x = 60, y = 9,  
+           label = humid_blight_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight vs Humid.png")
+
+blight_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_blight)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Leaf Blight",
+       title = "Rainfall vs Leaf Blight") +
+  annotate("label", x = 0.4, y = 15,  
+           label = rain_blight_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight vs Rain.png")
+
+summary_blight_corntype_bp <-
+  summary_blight %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_blight), sd = mean_sd(percent_incidence_blight)) %>% 
+  arrange(desc(w))
+
+summary_blight_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_blight_letters$factor_corn)$Letters
+
+
+summary_blight %>%
+  ggplot(aes(factor_corn, percent_incidence_blight)) + 
+  geom_boxplot() +
+  geom_text(data = summary_blight_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_blight_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.82, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Leaf Blight",
+       title = "Effect of Corn Type on Leaf Blight Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight Percent Incidence vs Corn Type.png")
+
+
+summary_blight_fert_bp <-
+  summary_blight %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_blight), sd = mean_sd(percent_incidence_blight)) %>% 
+  arrange(desc(w))
+
+summary_blight_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_blight_letters$order_treat)$Letters
+
+summary_blight %>%
+  ggplot(aes(order_treat, percent_incidence_blight)) + 
+  geom_boxplot() +
+  geom_text(data = summary_blight_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_blight_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Leaf Blight",
+       title = "Effect of Fertilizer Treatment Rate on Leaf Blight Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Leaf Blight Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Stalk Rot```
+```{r}
+# Stalk Rot 
+stalk_df_ev <- 
+  diseases_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Stalk Rot")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+stalk_df_ev$collect_date <- 
+  as.Date(stalk_df_ev$`Collection Date`, "%B %d, %Y")
+
+stalk_dmg_ev <-
+  stalk_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+stalk_joined_ev <-
+  stalk_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Stalk Rot")) == "0"),
+         sum_slight = sum(c_across(starts_with("Stalk Rot")) == "1"),
+         sum_light = sum(c_across(starts_with("Stalk Rot")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Stalk Rot")) == "5"),
+         sum_heavy = sum(c_across(starts_with("Stalk Rot")) == "7"),
+         sum_very = sum(c_across(starts_with("Stalk Rot")) == "9"),
+         average_damage_stalk = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants)),
+         damage_rating_stalk = (((1 * sum_slight) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_heavy) + (9 * sum_very)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_stalk = ((sum(c_across(sum_slight:sum_very))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(stalk_joined_ev)
+
+
+summary_stalk <-
+  stalk_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_stalk = n() * number_sampled_plants,
+            sum_avg_dmg_stalk = sum(average_damage_stalk),
+            sum_dmg_rate_stalk = sum(damage_rating_stalk),
+            sum_incidence_stalk = sum(incidence_stalk),
+            percent_incidence_stalk = (sum_incidence_stalk / total_count_samples_stalk) * percent_100)
+
+View(summary_stalk)
+
+summary_stalk$order_treat <- ordered(summary_stalk$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_stalk$factor_corn <- factor(summary_stalk$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+# ggqqplot(summary_stalk$percent_incidence_stalk)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_stalk <- ks.test(summary_stalk$percent_incidence_stalk, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_stalk <- ad.test(summary_stalk$percent_incidence_stalk)
+
+skew_stalk <- skewness(summary_stalk$percent_incidence_stalk)
+kurt_stalk <- kurtosis(summary_stalk$percent_incidence_stalk)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_stalk <- jarque.test(summary_stalk$percent_incidence_stalk)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_stalk <- kruskal.test(percent_incidence_stalk ~ order_treat, summary_stalk)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_stalk <- wilcox.test(percent_incidence_stalk ~ factor_corn, summary_stalk)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_stalk <- summary_stalk %>% friedman_test(percent_incidence_stalk ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_stalk <- leveneTest(percent_incidence_stalk ~ Treatment, summary_stalk)
+levenes_corntype_stalk <- leveneTest(percent_incidence_stalk ~ `Corn Type`, summary_stalk)
+levenes_municipality_stalk <- leveneTest(percent_incidence_stalk ~ Municipality, summary_stalk)
+levenes_province_stalk <- leveneTest(percent_incidence_stalk ~ Province, summary_stalk)
+levenes_fert_corn_stalk <- leveneTest(percent_incidence_stalk ~ interaction(Treatment, `Corn Type`), summary_stalk)
+
+
+# AnOVa
+aov_fert_stalk <- aov(percent_incidence_stalk ~ order_treat, summary_stalk)
+aov_corn_stalk <- aov(percent_incidence_stalk ~ factor_corn, summary_stalk) 
+ttest_corn_stalk <- t.test(percent_incidence_stalk ~ factor_corn, summary_stalk)
+
+# Two way AnOVa
+twoway_fert_corn_stalk <- aov(percent_incidence_stalk ~ order_treat + factor_corn, summary_stalk) 
+tukey_fert_corn_stalk <- TukeyHSD(twoway_fert_corn_stalk)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_stalk <- aov(percent_incidence_stalk ~ order_treat*factor_corn, summary_stalk)
+tukey_fert_corn_inter_stalk <- TukeyHSD(aov_fert_corn_inter_stalk)
+
+aov_fert_stalk %>% summary()
+aov_corn_stalk %>% summary()
+ttest_corn_stalk
+twoway_fert_corn_stalk %>% summary()
+print(tukey_fert_corn_stalk)
+aov_fert_corn_inter_stalk %>% summary()
+print(tukey_fert_corn_inter_stalk)
+
+twoway_fert_corn_stalk_letters <- multcompLetters4(twoway_fert_corn_stalk, tukey_fert_corn_stalk)
+aov_fert_corn_stalk_letters <- multcompLetters4(aov_fert_corn_inter_stalk, tukey_fert_corn_inter_stalk)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_stalk <- predict(bestNormalize(summary_stalk$percent_incidence_stalk, out_of_sample = FALSE, loo = TRUE))
+stalk_joined_ev$trans_incidence_stalk <- predict(bestNormalize(stalk_joined_ev$incidence_stalk, out_of_sample = FALSE, loo = TRUE))
+
+
+stalk_ev <-
+  stalk_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_stalk = as.numeric(incidence_stalk))
+
+
+cor_stalk_wind_incidence <- cor(stalk_ev$mean_wind, stalk_ev$incidence_stalk, method = "pearson", use = "pairwise.complete.obs")
+
+cor_stalk_temp_incidence <- cor(stalk_ev$mean_temp, stalk_ev$incidence_stalk, method = "pearson", use = "pairwise.complete.obs")
+
+cor_stalk_humid_incidence <- cor(stalk_ev$mean_humid, stalk_ev$incidence_stalk, method = "pearson", use = "pairwise.complete.obs")
+
+cor_stalk_rain_incidence <- cor(stalk_ev$mean_rain, stalk_ev$incidence_stalk, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_stalk  <- lm(incidence_stalk ~ mean_rain, data = stalk_joined_ev)
+lm_wind_stalk  <- lm(incidence_stalk ~ mean_wind, data = stalk_joined_ev)
+lm_humid_stalk <- lm(incidence_stalk ~ mean_humid, data = stalk_joined_ev)
+lm_temp_stalk  <- lm(incidence_stalk ~ mean_temp, data = stalk_joined_ev)
+
+
+temp_stalk_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_stalk)[1],
+    coef(lm_temp_stalk)[2],
+    round(cor_stalk_temp_incidence, 3)
+  )
+
+rain_stalk_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_stalk)[1],
+    coef(lm_rain_stalk)[2],
+    round(cor_stalk_rain_incidence, 3)
+  )
+
+
+wind_stalk_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_stalk)[1],
+    coef(lm_wind_stalk)[2],
+    round(cor_stalk_wind_incidence, 3)
+  )
+
+
+humid_stalk_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_stalk)[1],
+    coef(lm_humid_stalk)[2],
+    round(cor_stalk_humid_incidence, 3)
+  )
+
+
+stalk_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_stalk)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Stalk Rot", 
+       title = "Temperature vs Stalk Rot") +
+  annotate("label", x = 27.5, y = 13,  
+           label = temp_stalk_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot vs Temp.png")
+
+
+stalk_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_stalk)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Stalk Rot", 
+       title = "Wind Speed vs Stalk Rot") +
+  annotate("label", x = 8.2, y = 13,  
+           label = wind_stalk_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot vs Wind.png")
+
+stalk_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_stalk)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Stalk Rot", 
+       title = "Humidity vs Stalk Rot") +
+  annotate("label", x = 60, y = 13,  
+           label = humid_stalk_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot vs Humid.png")
+
+stalk_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_stalk)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Stalk Rot", 
+       title = "Rainfall vs Stalk Rot") +
+  annotate("label", x = 0.4, y = 15,  
+           label = rain_stalk_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot vs Rain.png")
+
+summary_stalk_corntype_bp <-
+  summary_stalk %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_stalk), sd = mean_sd(percent_incidence_stalk)) %>% 
+  arrange(desc(w))
+
+summary_stalk_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_stalk_letters$factor_corn)$Letters
+
+
+summary_stalk %>%
+  ggplot(aes(factor_corn, percent_incidence_stalk)) + 
+  geom_boxplot() +
+  geom_text(data = summary_stalk_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_stalk_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.2, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Stalk Rot",
+       title = "Effect of Corn Type on Stalk Rot Incidence") +
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot Percent Incidence vs Corn Type.png")
+
+
+summary_stalk_fert_bp <-
+  summary_stalk %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_stalk), sd = mean_sd(percent_incidence_stalk)) %>% 
+  arrange(desc(w))
+
+summary_stalk_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_stalk_letters$order_treat)$Letters
+
+summary_stalk %>%
+  ggplot(aes(order_treat, percent_incidence_stalk)) + 
+  geom_boxplot() +
+  geom_text(data = summary_stalk_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_stalk_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 2.3, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Stalk Rot",
+       title = "Effect of Fertilizer Treatment Rate on Stalk Rot Incidence") + 
+  theme_classic()
+ggsave(path = "../diseases", filename = "Stalk Rot Percent Incidence vs Fertilizer Treatment.png")
+
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+``` Correlation: Incidence vs Weather Parameters```
+```{r}
+# stalk
+stalk_cor_test_wind <- cor_test(stalk_ev, "mean_wind", "incidence_stalk")
+stalk_cor_test_temp <- cor_test(stalk_ev, "mean_temp", "incidence_stalk")
+stalk_cor_test_humid <- cor_test(stalk_ev, "mean_humid", "incidence_stalk")
+stalk_cor_test_rain <- cor_test(stalk_ev, "mean_rain", "incidence_stalk")
+
+corr_stalk_df <- data.frame(
+  weather_parameter = c(stalk_cor_test_wind$Parameter1, stalk_cor_test_temp$Parameter1, stalk_cor_test_humid$Parameter1, stalk_cor_test_rain$Parameter1),
+  incidence = c(stalk_cor_test_wind$Parameter2, stalk_cor_test_temp$Parameter2, stalk_cor_test_humid$Parameter2, stalk_cor_test_rain$Parameter2),
+  r_coef = c(stalk_cor_test_wind$r, stalk_cor_test_temp$r, stalk_cor_test_humid$r, stalk_cor_test_rain$r),
+  p_val  = c(stalk_cor_test_wind$p, stalk_cor_test_temp$p, stalk_cor_test_humid$p, stalk_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# blight
+blight_cor_test_wind <- cor_test(blight_ev, "mean_wind", "incidence_blight")
+blight_cor_test_temp <- cor_test(blight_ev, "mean_temp", "incidence_blight")
+blight_cor_test_humid <- cor_test(blight_ev, "mean_humid", "incidence_blight")
+blight_cor_test_rain <- cor_test(blight_ev, "mean_rain", "incidence_blight")
+
+
+corr_blight_df <- data.frame(
+  weather_parameter = c(blight_cor_test_wind$Parameter1, blight_cor_test_temp$Parameter1, blight_cor_test_humid$Parameter1, blight_cor_test_rain$Parameter1),
+  incidence = c(blight_cor_test_wind$Parameter2, blight_cor_test_temp$Parameter2, blight_cor_test_humid$Parameter2, blight_cor_test_rain$Parameter2),
+  r_coef = c(blight_cor_test_wind$r, blight_cor_test_temp$r, blight_cor_test_humid$r, blight_cor_test_rain$r),
+  p_val  = c(blight_cor_test_wind$p, blight_cor_test_temp$p, blight_cor_test_humid$p, blight_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+# leaf
+leaf_cor_test_wind <- cor_test(leaf_ev, "mean_wind", "incidence_leaf")
+leaf_cor_test_temp <- cor_test(leaf_ev, "mean_temp", "incidence_leaf")
+leaf_cor_test_humid <- cor_test(leaf_ev, "mean_humid", "incidence_leaf")
+leaf_cor_test_rain <- cor_test(leaf_ev, "mean_rain", "incidence_leaf")
+
+corr_leaf_df <- data.frame(
+  weather_parameter = c(leaf_cor_test_wind$Parameter1, leaf_cor_test_temp$Parameter1, leaf_cor_test_humid$Parameter1, leaf_cor_test_rain$Parameter1),
+  incidence = c(leaf_cor_test_wind$Parameter2, leaf_cor_test_temp$Parameter2, leaf_cor_test_humid$Parameter2, leaf_cor_test_rain$Parameter2),
+  r_coef = c(leaf_cor_test_wind$r, leaf_cor_test_temp$r, leaf_cor_test_humid$r, leaf_cor_test_rain$r),
+  p_val  = c(leaf_cor_test_wind$p, leaf_cor_test_temp$p, leaf_cor_test_humid$p, leaf_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# brown
+brown_cor_test_wind <- cor_test(brown_ev, "mean_wind", "incidence_brown")
+brown_cor_test_temp <- cor_test(brown_ev, "mean_temp", "incidence_brown")
+brown_cor_test_humid <- cor_test(brown_ev, "mean_humid", "incidence_brown")
+brown_cor_test_rain <- cor_test(brown_ev, "mean_rain", "incidence_brown")
+
+corr_brown_df <- data.frame(
+  weather_parameter = c(brown_cor_test_wind$Parameter1, brown_cor_test_temp$Parameter1, brown_cor_test_humid$Parameter1, brown_cor_test_rain$Parameter1),
+  incidence = c(brown_cor_test_wind$Parameter2, brown_cor_test_temp$Parameter2, brown_cor_test_humid$Parameter2, brown_cor_test_rain$Parameter2),
+  r_coef = c(brown_cor_test_wind$r, brown_cor_test_temp$r, brown_cor_test_humid$r, brown_cor_test_rain$r),
+  p_val  = c(brown_cor_test_wind$p, brown_cor_test_temp$p, brown_cor_test_humid$p, brown_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# mildew
+mildew_cor_test_wind <- cor_test(mildew_ev, "mean_wind", "incidence_mildew")
+mildew_cor_test_temp <- cor_test(mildew_ev, "mean_temp", "incidence_mildew")
+mildew_cor_test_humid <- cor_test(mildew_ev, "mean_humid", "incidence_mildew")
+mildew_cor_test_rain <- cor_test(mildew_ev, "mean_rain", "incidence_mildew")
+
+corr_mildew_df <- data.frame(
+  weather_parameter = c(mildew_cor_test_wind$Parameter1, mildew_cor_test_temp$Parameter1, mildew_cor_test_humid$Parameter1, mildew_cor_test_rain$Parameter1),
+  incidence = c(mildew_cor_test_wind$Parameter2, mildew_cor_test_temp$Parameter2, mildew_cor_test_humid$Parameter2, mildew_cor_test_rain$Parameter2),
+  r_coef = c(mildew_cor_test_wind$r, mildew_cor_test_temp$r, mildew_cor_test_humid$r, mildew_cor_test_rain$r),
+  p_val  = c(mildew_cor_test_wind$p, mildew_cor_test_temp$p, mildew_cor_test_humid$p, mildew_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# southrust
+southrust_cor_test_wind <- cor_test(southrust_ev, "mean_wind", "incidence_southrust")
+southrust_cor_test_temp <- cor_test(southrust_ev, "mean_temp", "incidence_southrust")
+southrust_cor_test_humid <- cor_test(southrust_ev, "mean_humid", "incidence_southrust")
+southrust_cor_test_rain <- cor_test(southrust_ev, "mean_rain", "incidence_southrust")
+
+corr_southrust_df <- data.frame(
+  weather_parameter = c(southrust_cor_test_wind$Parameter1, southrust_cor_test_temp$Parameter1, southrust_cor_test_humid$Parameter1, southrust_cor_test_rain$Parameter1),
+  incidence = c(southrust_cor_test_wind$Parameter2, southrust_cor_test_temp$Parameter2, southrust_cor_test_humid$Parameter2, southrust_cor_test_rain$Parameter2),
+  r_coef = c(southrust_cor_test_wind$r, southrust_cor_test_temp$r, southrust_cor_test_humid$r, southrust_cor_test_rain$r),
+  p_val  = c(southrust_cor_test_wind$p, southrust_cor_test_temp$p, southrust_cor_test_humid$p, southrust_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# rust
+rust_cor_test_wind <- cor_test(rust_ev, "mean_wind", "incidence_rust")
+rust_cor_test_temp <- cor_test(rust_ev, "mean_temp", "incidence_rust")
+rust_cor_test_humid <- cor_test(rust_ev, "mean_humid", "incidence_rust")
+rust_cor_test_rain <- cor_test(rust_ev, "mean_rain", "incidence_rust")
+
+corr_rust_df <- data.frame(
+  weather_parameter = c(rust_cor_test_wind$Parameter1, rust_cor_test_temp$Parameter1, rust_cor_test_humid$Parameter1, rust_cor_test_rain$Parameter1),
+  incidence = c(rust_cor_test_wind$Parameter2, rust_cor_test_temp$Parameter2, rust_cor_test_humid$Parameter2, rust_cor_test_rain$Parameter2),
+  r_coef = c(rust_cor_test_wind$r, rust_cor_test_temp$r, rust_cor_test_humid$r, rust_cor_test_rain$r),
+  p_val  = c(rust_cor_test_wind$p, rust_cor_test_temp$p, rust_cor_test_humid$p, rust_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# blsb
+blsb_cor_test_wind <- cor_test(blsb_ev, "mean_wind", "incidence_blsb")
+blsb_cor_test_temp <- cor_test(blsb_ev, "mean_temp", "incidence_blsb")
+blsb_cor_test_humid <- cor_test(blsb_ev, "mean_humid", "incidence_blsb")
+blsb_cor_test_rain <- cor_test(blsb_ev, "mean_rain", "incidence_blsb") 
+
+corr_blsb_df <- data.frame(
+  weather_parameter = c(blsb_cor_test_wind$Parameter1, blsb_cor_test_temp$Parameter1, blsb_cor_test_humid$Parameter1, blsb_cor_test_rain$Parameter1),
+  incidence = c(blsb_cor_test_wind$Parameter2, blsb_cor_test_temp$Parameter2, blsb_cor_test_humid$Parameter2, blsb_cor_test_rain$Parameter2),
+  r_coef = c(blsb_cor_test_wind$r, blsb_cor_test_temp$r, blsb_cor_test_humid$r, blsb_cor_test_rain$r),
+  p_val  = c(blsb_cor_test_wind$p, blsb_cor_test_temp$p, blsb_cor_test_humid$p, blsb_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+weather_disease_corr <-
+  corr_stalk_df %>% 
+  full_join(corr_blight_df) %>% 
+  full_join(corr_leaf_df) %>% 
+  full_join(corr_brown_df) %>%
+  full_join(corr_mildew_df) %>%
+  full_join(corr_southrust_df) %>%
+  full_join(corr_rust_df) %>%
+  full_join(corr_blsb_df)
+
+weather_disease_corr
+
+```
+
+``` Correlation: Diseases vs Weather Parameters with rstatix```
+```{r}
+library("rstatix")
+
+# stalk
+stalk_cor_windx <- cor_test(stalk_ev, "mean_wind", "incidence_stalk")
+stalk_cor_tempx <- cor_test(stalk_ev, "mean_temp", "incidence_stalk")
+stalk_cor_humidx <- cor_test(stalk_ev, "mean_humid", "incidence_stalk")
+stalk_cor_rainx <- cor_test(stalk_ev, "mean_rain", "incidence_stalk")
+
+corr_stalk_dfx <- data.frame(
+  weather_parameter = c(stalk_cor_windx$var1, stalk_cor_tempx$var1, stalk_cor_humidx$var1, stalk_cor_rainx$var1),
+  incidence = c(stalk_cor_windx$var2, stalk_cor_tempx$var2, stalk_cor_humidx$var2, stalk_cor_rainx$var2),
+  r_coef = c(stalk_cor_windx$cor, stalk_cor_tempx$cor, stalk_cor_humidx$cor, stalk_cor_rainx$cor),
+  p_val  = c(stalk_cor_windx$p, stalk_cor_tempx$p, stalk_cor_humidx$p, stalk_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# blight
+blight_cor_windx <- cor_test(blight_ev, "mean_wind", "incidence_blight")
+blight_cor_tempx <- cor_test(blight_ev, "mean_temp", "incidence_blight")
+blight_cor_humidx <- cor_test(blight_ev, "mean_humid", "incidence_blight")
+blight_cor_rainx <- cor_test(blight_ev, "mean_rain", "incidence_blight")
+
+
+corr_blight_dfx <- data.frame(
+  weather_parameter = c(blight_cor_windx$var1, blight_cor_tempx$var1, blight_cor_humidx$var1, blight_cor_rainx$var1),
+  incidence = c(blight_cor_windx$var2, blight_cor_tempx$var2, blight_cor_humidx$var2, blight_cor_rainx$var2),
+  r_coef = c(blight_cor_windx$cor, blight_cor_tempx$cor, blight_cor_humidx$cor, blight_cor_rainx$cor),
+  p_val  = c(blight_cor_windx$p, blight_cor_tempx$p, blight_cor_humidx$p, blight_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+# leaf
+leaf_cor_windx <- cor_test(leaf_ev, "mean_wind", "incidence_leaf")
+leaf_cor_tempx <- cor_test(leaf_ev, "mean_temp", "incidence_leaf")
+leaf_cor_humidx <- cor_test(leaf_ev, "mean_humid", "incidence_leaf")
+leaf_cor_rainx <- cor_test(leaf_ev, "mean_rain", "incidence_leaf")
+
+corr_leaf_dfx <- data.frame(
+  weather_parameter = c(leaf_cor_windx$var1, leaf_cor_tempx$var1, leaf_cor_humidx$var1, leaf_cor_rainx$var1),
+  incidence = c(leaf_cor_windx$var2, leaf_cor_tempx$var2, leaf_cor_humidx$var2, leaf_cor_rainx$var2),
+  r_coef = c(leaf_cor_windx$cor, leaf_cor_tempx$cor, leaf_cor_humidx$cor, leaf_cor_rainx$cor),
+  p_val  = c(leaf_cor_windx$p, leaf_cor_tempx$p, leaf_cor_humidx$p, leaf_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# brown
+brown_cor_windx <- cor_test(brown_ev, "mean_wind", "incidence_brown")
+brown_cor_tempx <- cor_test(brown_ev, "mean_temp", "incidence_brown")
+brown_cor_humidx <- cor_test(brown_ev, "mean_humid", "incidence_brown")
+brown_cor_rainx <- cor_test(brown_ev, "mean_rain", "incidence_brown")
+
+corr_brown_dfx <- data.frame(
+  weather_parameter = c(brown_cor_windx$var1, brown_cor_tempx$var1, brown_cor_humidx$var1, brown_cor_rainx$var1),
+  incidence = c(brown_cor_windx$var2, brown_cor_tempx$var2, brown_cor_humidx$var2, brown_cor_rainx$var2),
+  r_coef = c(brown_cor_windx$cor, brown_cor_tempx$cor, brown_cor_humidx$cor, brown_cor_rainx$cor),
+  p_val  = c(brown_cor_windx$p, brown_cor_tempx$p, brown_cor_humidx$p, brown_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# mildew
+mildew_cor_windx <- cor_test(mildew_ev, "mean_wind", "incidence_mildew")
+mildew_cor_tempx <- cor_test(mildew_ev, "mean_temp", "incidence_mildew")
+mildew_cor_humidx <- cor_test(mildew_ev, "mean_humid", "incidence_mildew")
+mildew_cor_rainx <- cor_test(mildew_ev, "mean_rain", "incidence_mildew")
+
+corr_mildew_dfx <- data.frame(
+  weather_parameter = c(mildew_cor_windx$var1, mildew_cor_tempx$var1, mildew_cor_humidx$var1, mildew_cor_rainx$var1),
+  incidence = c(mildew_cor_windx$var2, mildew_cor_tempx$var2, mildew_cor_humidx$var2, mildew_cor_rainx$var2),
+  r_coef = c(mildew_cor_windx$cor, mildew_cor_tempx$cor, mildew_cor_humidx$cor, mildew_cor_rainx$cor),
+  p_val  = c(mildew_cor_windx$p, mildew_cor_tempx$p, mildew_cor_humidx$p, mildew_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# southrust
+southrust_cor_windx <- cor_test(southrust_ev, "mean_wind", "incidence_southrust")
+southrust_cor_tempx <- cor_test(southrust_ev, "mean_temp", "incidence_southrust")
+southrust_cor_humidx <- cor_test(southrust_ev, "mean_humid", "incidence_southrust")
+southrust_cor_rainx <- cor_test(southrust_ev, "mean_rain", "incidence_southrust")
+
+corr_southrust_dfx <- data.frame(
+  weather_parameter = c(southrust_cor_windx$var1, southrust_cor_tempx$var1, southrust_cor_humidx$var1, southrust_cor_rainx$var1),
+  incidence = c(southrust_cor_windx$var2, southrust_cor_tempx$var2, southrust_cor_humidx$var2, southrust_cor_rainx$var2),
+  r_coef = c(southrust_cor_windx$cor, southrust_cor_tempx$cor, southrust_cor_humidx$cor, southrust_cor_rainx$cor),
+  p_val  = c(southrust_cor_windx$p, southrust_cor_tempx$p, southrust_cor_humidx$p, southrust_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# rust
+rust_cor_windx <- cor_test(rust_ev, "mean_wind", "incidence_rust")
+rust_cor_tempx <- cor_test(rust_ev, "mean_temp", "incidence_rust")
+rust_cor_humidx <- cor_test(rust_ev, "mean_humid", "incidence_rust")
+rust_cor_rainx <- cor_test(rust_ev, "mean_rain", "incidence_rust")
+
+corr_rust_dfx <- data.frame(
+  weather_parameter = c(rust_cor_windx$var1, rust_cor_tempx$var1, rust_cor_humidx$var1, rust_cor_rainx$var1),
+  incidence = c(rust_cor_windx$var2, rust_cor_tempx$var2, rust_cor_humidx$var2, rust_cor_rainx$var2),
+  r_coef = c(rust_cor_windx$cor, rust_cor_tempx$cor, rust_cor_humidx$cor, rust_cor_rainx$cor),
+  p_val  = c(rust_cor_windx$p, rust_cor_tempx$p, rust_cor_humidx$p, rust_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# blsb
+blsb_cor_windx <- cor_test(blsb_ev, "mean_wind", "incidence_blsb")
+blsb_cor_tempx <- cor_test(blsb_ev, "mean_temp", "incidence_blsb")
+blsb_cor_humidx <- cor_test(blsb_ev, "mean_humid", "incidence_blsb")
+blsb_cor_rainx <- cor_test(blsb_ev, "mean_rain", "incidence_blsb") 
+
+corr_blsb_dfx <- data.frame(
+  weather_parameter = c(blsb_cor_windx$var1, blsb_cor_tempx$var1, blsb_cor_humidx$var1, blsb_cor_rainx$var1),
+  incidence = c(blsb_cor_windx$var2, blsb_cor_tempx$var2, blsb_cor_humidx$var2, blsb_cor_rainx$var2),
+  r_coef = c(blsb_cor_windx$cor, blsb_cor_tempx$cor, blsb_cor_humidx$cor, blsb_cor_rainx$cor),
+  p_val  = c(blsb_cor_windx$p, blsb_cor_tempx$p, blsb_cor_humidx$p, blsb_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+weather_disease_corrx <-
+  corr_stalk_dfx %>% 
+  full_join(corr_blight_dfx) %>% 
+  full_join(corr_leaf_dfx) %>% 
+  full_join(corr_brown_dfx) %>%
+  full_join(corr_mildew_dfx) %>%
+  full_join(corr_southrust_dfx) %>%
+  full_join(corr_rust_dfx) %>%
+  full_join(corr_blsb_dfx)
+
+weather_disease_corrx
+
+
+detach("package:ggpubr", unload = TRUE)
+detach("package:rstatix", unload = TRUE)
+```
+
+
+
+
+```{r}
+# stalk
+print(paste(round(correlation::cor_to_p(cor_stalk_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and stalk incidence."))
+print(paste(round(correlation::cor_to_p(cor_stalk_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and stalk incidence."))
+print(paste(round(correlation::cor_to_p(cor_stalk_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and stalk incidence."))
+print(paste(round(correlation::cor_to_p(cor_stalk_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and stalk incidence."))
+
+
+
+# blight
+print(paste(round(correlation::cor_to_p(cor_blight_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and blight incidence."))
+print(paste(round(correlation::cor_to_p(cor_blight_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and blight incidence."))
+print(paste(round(correlation::cor_to_p(cor_blight_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and blight incidence."))
+print(paste(round(correlation::cor_to_p(cor_blight_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and blight incidence."))
+
+
+# leaf
+print(paste(round(correlation::cor_to_p(cor_leaf_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and leaf incidence."))
+print(paste(round(correlation::cor_to_p(cor_leaf_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and leaf incidence."))
+print(paste(round(correlation::cor_to_p(cor_leaf_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and leaf incidence."))
+print(paste(round(correlation::cor_to_p(cor_leaf_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and leaf incidence."))
+
+
+# brown
+print(paste(round(correlation::cor_to_p(cor_brown_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and brown incidence."))
+print(paste(round(correlation::cor_to_p(cor_brown_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and brown incidence."))
+print(paste(round(correlation::cor_to_p(cor_brown_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and brown incidence."))
+print(paste(round(correlation::cor_to_p(cor_brown_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and brown incidence."))
+
+# mildew
+print(paste(round(correlation::cor_to_p(cor_mildew_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and mildew incidence."))
+print(paste(round(correlation::cor_to_p(cor_mildew_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and mildew incidence."))
+print(paste(round(correlation::cor_to_p(cor_mildew_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and mildew incidence."))
+print(paste(round(correlation::cor_to_p(cor_mildew_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and mildew incidence."))
+
+
+# southrust
+print(paste(round(correlation::cor_to_p(cor_southrust_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and southrust incidence."))
+print(paste(round(correlation::cor_to_p(cor_southrust_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and southrust incidence."))
+print(paste(round(correlation::cor_to_p(cor_southrust_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and southrust incidence."))
+print(paste(round(correlation::cor_to_p(cor_southrust_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and southrust incidence."))
+
+
+# rust
+print(paste(round(correlation::cor_to_p(cor_rust_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and rust incidence."))
+print(paste(round(correlation::cor_to_p(cor_rust_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and rust incidence."))
+print(paste(round(correlation::cor_to_p(cor_rust_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and rust incidence."))
+print(paste(round(correlation::cor_to_p(cor_rust_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and rust incidence."))
+
+
+# blsb
+print(paste(round(correlation::cor_to_p(cor_blsb_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and blsb incidence."))
+print(paste(round(correlation::cor_to_p(cor_blsb_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and blsb incidence."))
+print(paste(round(correlation::cor_to_p(cor_blsb_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and blsb incidence."))
+print(paste(round(correlation::cor_to_p(cor_blsb_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and blsb incidence."))
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,2918 @@
+---
+title: "corn_variety_edit"
+author: "Mihkail Cornell"
+date: "2023-09-05"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, fig.width=8, fig.height=5)
+library("dplyr")
+library("ggpubr")
+library("tidymodels")
+library("tidyverse")
+library("ggpubr")
+library("broom")
+library("multcompView")
+library("car")
+
+plot_width <- 8
+plot_height <- 5
+plot_dpi <- 300
+
+set.seed(123)
+insect_raw$Variety %>% unique()
+```
+
+```Corn variety engineering```
+```{r}
+insect_variety_edit <-
+  insect_raw %>%
+  mutate(variety = case_when(str_detect(Variety, "^[OPV]+([_ ])+([WC]+|[WwHhIiTtEe]+)$") ~ "OPV White",
+                             str_detect(Variety, "^[OPV]+([ _]*)+[YyEeLlOoWw]+") ~ "OPV Yellow",
+                             str_detect(Variety, "^(M[ACHOacho]+)[_ ]*(F1)+") ~ "Macho F1",
+                             str_detect(Variety, "^(S+[WwEeEeTt])(\\s)*([CcOoRrNn]+)") ~ "Sweet Corn Hybrid",
+                             str_detect(Variety, "M[aALlAaGgKkIiTt]") ~ "Malagkit",
+                             str_detect(Variety, "\\b(Y+[EeLlLlOoWw_* COoRrNn]+)+") ~ "Yellow Corn Hybrid",
+                             str_detect(Variety, "(FILIPINA_703)+|(Filipina 703)+") ~ "Filipina 703-HY",
+                             str_detect(Variety, "^([Cn])+") ~ "Cn 224-OPV White",
+                             str_detect(Variety, "^\\(HYBRID YELLOW CORN\\)|^[Yellow Corn Hybrid]$") ~ "Hybrid Yellow Corn",
+                             str_detect(Variety, "^([Mem]+[ei]s+)+") ~ "Memphis Native White Corn",
+                             str_detect(Variety, "^((FILIPINA_802)+|(Fi[l+ĺ]+[iu]+(pi)+[n ]+a+(\\s|-))*802)+") ~ "Filipina 802-Hybrid White",
+                             str_detect(Variety, "[NK]+[ ]*[6410]+") ~ "NK6410 BT/GT Hybrid",
+                             str_detect(Variety, "B[Rr][Ii]+[GgHhTt]") ~ "Bright Jane",
+                             str_detect(Variety, "^J") ~ "J505",
+                             str_detect(Variety, "^(Native) ([Ww]hite)$") ~ "Native White",
+                             str_detect(Variety, "^(P+|[Pioneer]+)") ~ "Pioneer 266",
+                             str_detect(Variety, "^(NSIC GM)") ~ "NSIC GM CN38",
+                             str_detect(Variety, "^[Super 999]+") ~ "Super 999-HY",
+                             str_detect(Variety, "\\b(Supreme 5150)+") ~ "Supreme 5150-HY",
+                             str_detect(Variety, "B118G") ~ "B118G-Hybrid Yellow",
+                             str_detect(Variety, "T+[INIGinig]+[u]*[IiBb]") ~ "Tiniguib",
+                             str_detect(Variety, "G[LUTINOUSlutinous]") ~ "Glutinous White",
+                             str_detect(Variety, "Bio [Ss]eed") ~ "Bio Seed",
+                             str_detect(Variety, "(BioCorn 108)+") ~ "BioCorn 108-HY",
+         TRUE ~ Variety))
+
+number_sampled_plants <- 20
+percent_100 <- 100
+insect_variety_edit$variety %>% unique()
+```
+
+```Rating of 1 is classified as No damage to very slight```
+```Corn Borer, Semi-looper, earworm```
+```Borer```
+
+```{r}
+# Corn borer
+borer_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Corn Borer - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+borer_df_ev$collect_date <- 
+  as.Date(borer_df_ev$`Collection Date`, "%B %d, %Y")
+
+borer_dmg_ev <-
+  borer_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+borer_joined_ev <-
+  borer_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  # mutate(across(contains("Corn Borer - Damage Rating "), 
+  #        ~ case_when( . < 2 ~ "No",
+  #                     . < 4 ~ "Light",
+  #                     . < 6 ~ "Moderate",
+  #                     . < 8 ~ "Severe",
+  #                     . < 10 ~ "High"), 
+  #        .names="Class_Infest_{.col}")) %>%
+  # mutate(across(contains("Class_Infest_Corn Borer - Damage Rating "), ~classification_dmg(.))) %>%
+  # # get the modal observation rating
+  #  mutate(Modeborer_class_infest = getmode(c_across(contains("Class_Infest_Corn Borer - Damage Rating ")))) %>%
+  # # create ranks column
+  # mutate(borer_mode_classification = rank(Modeborer_class_infest)) %>%
+  rowwise() %>%
+  mutate(sum_no = sum(c_across(starts_with("Corn Borer - Damage Rating ")) == "1"),
+         sum_light = sum(c_across(starts_with("Corn Borer - Damage Rating ")) == "3"),
+         sum_moderate = sum(c_across(starts_with("Corn Borer - Damage Rating ")) == "5"),
+         sum_severe = sum(c_across(starts_with("Corn Borer - Damage Rating ")) == "7"),
+         sum_high = sum(c_across(starts_with("Corn Borer - Damage Rating ")) == "9"),
+         average_damage_borer = (((3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+         damage_rating_borer = (((3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_borer = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+         )
+
+
+View(borer_joined_ev)
+
+# borer_joined_ev %>%
+#   count(Province, Municipality, `Corn Type`)
+
+summary_borer <-
+  borer_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_borer = n() * number_sampled_plants,
+            sum_avg_dmg_borer = sum(average_damage_borer),
+            sum_dmg_rate_borer = sum(damage_rating_borer),
+            sum_incidence_borer = sum(incidence_borer),
+            percent_incidence_borer = (sum_incidence_borer / total_count_samples_borer) * percent_100)
+
+View(summary_borer)
+
+summary_borer$order_treat <- ordered(summary_borer$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_borer$factor_corn <- factor(summary_borer$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+ggqqplot(summary_borer$percent_incidence_borer)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_borer <- ks.test(summary_borer$percent_incidence_borer, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_borer <- ad.test(summary_borer$percent_incidence_borer)
+
+skew_borer <- skewness(summary_borer$percent_incidence_borer)
+kurt_borer <- kurtosis(summary_borer$percent_incidence_borer)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_borer <- jarque.test(summary_borer$percent_incidence_borer)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_borer <- kruskal.test(percent_incidence_borer ~ order_treat, summary_borer)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_borer <- wilcox.test(percent_incidence_borer ~ factor_corn, summary_borer)
+
+# The Friedman test determines if there are differences among groups for two-way data structured in a specific way, namely in an unreplicated complete block design.  
+# In this design, one variable serves as the treatment or group variable, 
+# and another variable serves as the blocking variable.
+# fried_fert_corn_borer <- summary_borer %>% friedman_test(percent_incidence_borer ~ order_treat |factor_corn)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_borer <- leveneTest(percent_incidence_borer ~ Treatment, summary_borer)
+levenes_corntype_borer <- leveneTest(percent_incidence_borer ~ `Corn Type`, summary_borer)
+levenes_municipality_borer <- leveneTest(percent_incidence_borer ~ Municipality, summary_borer)
+levenes_province_borer <- leveneTest(percent_incidence_borer ~ Province, summary_borer)
+levenes_fert_corn_borer <- leveneTest(percent_incidence_borer ~ interaction(Treatment, `Corn Type`), summary_borer)
+
+
+# AnOVa
+aov_fert_borer <- aov(percent_incidence_borer ~ order_treat, summary_borer)
+aov_corn_borer <- aov(percent_incidence_borer ~ factor_corn, summary_borer) 
+ttest_corn_borer <- t.test(percent_incidence_borer ~ factor_corn, summary_borer)
+
+# Two way AnOVa
+twoway_fert_corn_borer <- aov(percent_incidence_borer ~ order_treat + factor_corn, summary_borer) 
+tukey_fert_corn_borer <- TukeyHSD(twoway_fert_corn_borer)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_borer <- aov(percent_incidence_borer ~ order_treat*factor_corn, summary_borer)
+tukey_fert_corn_inter_borer <- TukeyHSD(aov_fert_corn_inter_borer)
+
+aov_fert_borer %>% summary()
+aov_corn_borer %>% summary()
+ttest_corn_borer
+twoway_fert_corn_borer %>% summary()
+print(tukey_fert_corn_borer)
+aov_fert_corn_inter_borer %>% summary()
+print(tukey_fert_corn_inter_borer)
+
+twoway_fert_corn_borer_letters <- multcompLetters4(twoway_fert_corn_borer, tukey_fert_corn_borer)
+aov_fert_corn_borer_letters <- multcompLetters4(aov_fert_corn_inter_borer, tukey_fert_corn_inter_borer)
+
+
+# Create transformed objects using bestNormalize
+library("bestNormalize")
+bestNorm_borer <- predict(bestNormalize(summary_borer$percent_incidence_borer, out_of_sample = FALSE, loo = TRUE))
+borer_joined_ev$trans_incidence_borer <- predict(bestNormalize(borer_joined_ev$incidence_borer, out_of_sample = FALSE, loo = TRUE))
+
+
+borer_ev <-
+  borer_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_borer = as.numeric(incidence_borer))
+
+
+cor_borer_wind_incidence <- cor(borer_ev$mean_wind, borer_ev$incidence_borer, method = "pearson", use = "pairwise.complete.obs")
+
+cor_borer_temp_incidence <- cor(borer_ev$mean_temp, borer_ev$incidence_borer, method = "pearson", use = "pairwise.complete.obs")
+
+cor_borer_humid_incidence <- cor(borer_ev$mean_humid, borer_ev$incidence_borer, method = "pearson", use = "pairwise.complete.obs")
+
+cor_borer_rain_incidence <- cor(borer_ev$mean_rain, borer_ev$incidence_borer, method = "pearson", use = "pairwise.complete.obs")
+
+
+
+# lm
+lm_rain_borer  <- lm(incidence_borer ~ mean_rain, data = borer_joined_ev)
+lm_wind_borer  <- lm(incidence_borer ~ mean_wind, data = borer_joined_ev)
+lm_humid_borer <- lm(incidence_borer ~ mean_humid, data = borer_joined_ev)
+lm_temp_borer  <- lm(incidence_borer ~ mean_temp, data = borer_joined_ev)
+
+
+temp_borer_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_borer)[1],
+    coef(lm_temp_borer)[2],
+    round(cor_borer_temp_incidence, 3)
+  )
+
+rain_borer_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_borer)[1],
+    coef(lm_rain_borer)[2],
+    round(cor_borer_rain_incidence, 3)
+  )
+
+
+wind_borer_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_borer)[1],
+    coef(lm_wind_borer)[2],
+    round(cor_borer_wind_incidence, 3)
+  )
+
+
+humid_borer_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_borer)[1],
+    coef(lm_humid_borer)[2],
+    round(cor_borer_humid_incidence, 3)
+  )
+
+
+borer_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_borer)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average temperature (C)", 
+       y = "Incidence Borer",
+       title = "Temperature and Incidence of Corn Borer") +
+  annotate("label", x = 27, y = 8,  
+           label = temp_borer_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer vs Temperature.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+
+borer_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_borer)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Borer",
+       title = "Wind Speed and Incidence of Corn Borer") +
+  annotate("label", x = 7, y = 8,  
+           label = wind_borer_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer vs Wind.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+
+borer_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_borer)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Borer",
+       title = "Humidity and Incidence of Corn Borer") +
+  annotate("label", x = 60, y = 8,  
+           label = humid_borer_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer vs Humidity.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+
+borer_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_borer)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Borer",
+       title = "Rainfall and Incidence of Corn Borer") +
+  annotate("label", x = 0.4, y = 10,  
+           label = rain_borer_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer vs Rain.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+summary_borer_corntype_bp <-
+  summary_borer %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_borer), sd = mean_sd(percent_incidence_borer)) %>% 
+  arrange(desc(w))
+
+summary_borer_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_borer_letters$factor_corn)$Letters
+
+
+summary_borer %>%
+  ggplot(aes(factor_corn, percent_incidence_borer)) + 
+  geom_boxplot() +
+  geom_text(data = summary_borer_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_borer_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.1, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Borer",
+       title = "Effect of Corn Type to Borer Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer Percent Incidence vs Corn Type.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+
+summary_borer_fert_bp <-
+  summary_borer %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_borer), sd = mean_sd(percent_incidence_borer)) %>% 
+  arrange(desc(w))
+
+summary_borer_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_borer_letters$order_treat)$Letters
+
+summary_borer %>%
+  ggplot(aes(order_treat, percent_incidence_borer)) + 
+  geom_boxplot() +
+  geom_text(data = summary_borer_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_borer_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.25, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Borer",
+       title = "Effect of Fertilizer Treatment Rate to Borer Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Corn Borer Percent Incidence vs Fertilizer Treatment.png", width=plot_width, height=plot_height, dpi=plot_dpi)
+
+
+
+detach("package:bestNormalize", unload = TRUE)
+detach("package:nortest", unload = TRUE)
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage to very slight```
+```Corn Borer, Semi-looper, earworm```
+```Semilooper```
+```{r}
+# Semilooper
+semilooper_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Semi-looper - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+semilooper_df_ev$collect_date <- 
+  as.Date(semilooper_df_ev$`Collection Date`, "%B %d, %Y")
+
+semilooper_dmg_ev <-
+  semilooper_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+semilooper_joined_ev <-
+  semilooper_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # # mutate_at(c(9:28), as.factor) %>%
+  # mutate(across(contains("Semi-looper - Damage Rating "), 
+  #        ~ case_when( . < 2 ~ "No",
+  #                     . < 4 ~ "Light",
+  #                     . < 6 ~ "Moderate",
+  #                     . < 8 ~ "Severe",
+  #                     . < 10 ~ "High"), 
+  #        .names="Class_Infest_{.col}")) %>%
+  # mutate(across(contains("Class_Infest_Semi-looper - Damage Rating "), ~classification_dmg(.))) %>%
+  # # get the modal observation rating
+  #  mutate(Modesemilooper_class_infest = getmode(c_across(contains("Class_Infest_Semi-looper - Damage Rating ")))) %>%
+  # # create ranks column
+  # mutate(semilooper_mode_classification = rank(Modesemilooper_class_infest))
+  rowwise() %>%
+    mutate(sum_no = sum(c_across(starts_with("Semi-looper - Damage Rating")) == "1"),
+           sum_light = sum(c_across(starts_with("Semi-looper - Damage Rating")) == "3"),
+           sum_moderate = sum(c_across(starts_with("Semi-looper - Damage Rating")) == "5"),
+           sum_severe = sum(c_across(starts_with("Semi-looper - Damage Rating")) == "7"),
+           sum_high = sum(c_across(starts_with("Semi-looper - Damage Rating")) == "9"),
+           average_damage_semilooper = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+           damage_rating_semilooper = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+           incidence_semilooper = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+           )
+
+View(semilooper_joined_ev)
+
+summary_semilooper <-
+  semilooper_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_semilooper = n() * number_sampled_plants,
+            sum_avg_dmg_semilooper = sum(average_damage_semilooper),
+            sum_dmg_rate_semilooper = sum(damage_rating_semilooper),
+            sum_incidence_semilooper = sum(incidence_semilooper),
+            percent_incidence_semilooper = (sum_incidence_semilooper / total_count_samples_semilooper) * percent_100)
+
+View(summary_semilooper)
+
+summary_semilooper %>%
+  ggplot(aes(percent_incidence_semilooper)) +
+  geom_density()
+
+summary_semilooper %>%
+  ggplot(aes(percent_incidence_semilooper)) +
+  geom_histogram()
+
+summary_semilooper %>%
+  ggplot(aes(sample=percent_incidence_semilooper)) +
+  stat_qq() +
+  stat_qq_line()
+
+summary_semilooper$order_treat <- ordered(summary_semilooper$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_semilooper$factor_corn <- factor(summary_semilooper$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+
+ggqqplot(summary_semilooper$percent_incidence_semilooper)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_semilooper <- ks.test(summary_semilooper$percent_incidence_semilooper, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines 
+# how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+# It is a modification of the Kolmogorov-Smirnov (K-S) test and 
+# gives more weight to the tails than does the K-S test.
+ad_test_semilooperlooper <- ad.test(summary_semilooper$percent_incidence_semilooper)
+
+skew_semilooper <- skewness(summary_semilooper$percent_incidence_semilooper)
+kurt_semilooper <- kurtosis(summary_semilooper$percent_incidence_semilooper)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_semilooper <- jarque.test(summary_semilooper$percent_incidence_semilooper)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_semilooper <- leveneTest(percent_incidence_semilooper ~ Treatment, summary_semilooper)
+levenes_corntype_semilooper <- leveneTest(percent_incidence_semilooper ~ `Corn Type`, summary_semilooper)
+levenes_municipality_semilooper <- leveneTest(percent_incidence_semilooper ~ Municipality, summary_semilooper)
+levenes_province_semilooper <- leveneTest(percent_incidence_semilooper ~ Province, summary_semilooper)
+levenes_fert_corn_semilooper <- leveneTest(percent_incidence_semilooper ~ interaction(Treatment, `Corn Type`), summary_semilooper)
+
+# AnOVa
+aov_fert_semilooper <- aov(percent_incidence_semilooper ~ order_treat, summary_semilooper)
+aov_corn_semilooper <- aov(percent_incidence_semilooper ~ factor_corn, summary_semilooper) 
+ttest_corn_semilooper <- t.test(percent_incidence_semilooper ~ factor_corn, summary_semilooper)
+
+# Two way AnOVa
+twoway_fert_corn_semilooper <- aov(percent_incidence_semilooper ~ order_treat + factor_corn, summary_semilooper) 
+tukey_fert_corn_semilooper <- TukeyHSD(twoway_fert_corn_semilooper)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_semilooper <- aov(percent_incidence_semilooper ~ order_treat*factor_corn, summary_semilooper)
+tukey_fert_corn_inter_semilooper <- TukeyHSD(aov_fert_corn_inter_semilooper)
+
+aov_fert_semilooper %>% summary()
+aov_corn_semilooper %>% summary()
+ttest_corn_semilooper
+twoway_fert_corn_semilooper %>% summary()
+print(tukey_fert_corn_semilooper)
+aov_fert_corn_inter_semilooper %>% summary()
+print(tukey_fert_corn_inter_semilooper)
+
+twoway_fert_corn_semilooper_letters <- multcompLetters4(twoway_fert_corn_semilooper, tukey_fert_corn_semilooper)
+aov_fert_corn_semilooper_letters <- multcompLetters4(aov_fert_corn_inter_semilooper, tukey_fert_corn_inter_semilooper)
+# detach("package:onewaytests", unload = TRUE)
+
+semilooper_ev <-
+  semilooper_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_semilooper = as.numeric(incidence_semilooper))
+
+
+cor_semilooper_wind_incidence <- cor(semilooper_ev$mean_wind, semilooper_ev$incidence_semilooper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_semilooper_temp_incidence <- cor(semilooper_ev$mean_temp, semilooper_ev$incidence_semilooper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_semilooper_humid_incidence <- cor(semilooper_ev$mean_humid, semilooper_ev$incidence_semilooper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_semilooper_rain_incidence <- cor(semilooper_ev$mean_rain, semilooper_ev$incidence_semilooper, method = "pearson", use = "pairwise.complete.obs")
+
+
+# lm
+lm_rain_semilooper  <- lm(incidence_semilooper ~ mean_rain, data = semilooper_joined_ev)
+lm_wind_semilooper  <- lm(incidence_semilooper ~ mean_wind, data = semilooper_joined_ev)
+lm_humid_semilooper <- lm(incidence_semilooper ~ mean_humid, data = semilooper_joined_ev)
+lm_temp_semilooper  <- lm(incidence_semilooper ~ mean_temp, data = semilooper_joined_ev)
+
+
+temp_semilooper_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_semilooper)[1],
+    coef(lm_temp_semilooper)[2],
+    round(cor_semilooper_temp_incidence, 3)
+  )
+
+rain_semilooper_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_semilooper)[1],
+    coef(lm_rain_semilooper)[2],
+    round(cor_semilooper_rain_incidence, 3)
+  )
+
+
+wind_semilooper_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_semilooper)[1],
+    coef(lm_wind_semilooper)[2],
+    round(cor_semilooper_wind_incidence, 3)
+  )
+
+
+humid_semilooper_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_semilooper)[1],
+    coef(lm_humid_semilooper)[2],
+    round(cor_semilooper_humid_incidence, 3)
+  )
+
+
+semilooper_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_semilooper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Semilooper",
+       title = "Temperature vs Corn Semi-looper") +
+  annotate("label", x = 27, y = 8,  
+           label = temp_semilooper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper vs Temperature.png")
+
+
+semilooper_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_semilooper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Semilooper",
+       title = "Wind Speed vs Corn Semi-looper") +
+  annotate("label", x = 7, y = 8,  
+           label = wind_semilooper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper vs Wind.png")
+
+
+semilooper_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_semilooper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Semilooper",
+       title = "Humidity vs Corn Semi-looper") +
+  annotate("label", x = 60, y = 8,  
+           label = humid_semilooper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper vs Humidity.png")
+
+
+semilooper_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_semilooper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Semilooper",
+       title = "Rainfall vs Corn Semi-looper") +
+  annotate("label", x = 0.5, y = 10,  
+           label = rain_semilooper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper vs Rain.png")
+
+
+summary_semilooper_corntype_bp <-
+  summary_semilooper %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_semilooper), sd = mean_sd(percent_incidence_semilooper)) %>% 
+  arrange(desc(w))
+
+summary_semilooper_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_semilooper_letters$factor_corn)$Letters
+
+
+summary_semilooper %>%
+  ggplot(aes(factor_corn, percent_incidence_semilooper)) + 
+  geom_boxplot() +
+  geom_text(data = summary_semilooper_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_semilooper_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.75, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Semilooper",
+       title = "Effect of Corn Type on Corn Semi-looper Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper Percent Incidence vs Corn Type.png")
+
+
+summary_semilooper_fert_bp <-
+  summary_semilooper %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_semilooper), sd = mean_sd(percent_incidence_semilooper)) %>% 
+  arrange(desc(w))
+
+summary_semilooper_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_semilooper_letters$order_treat)$Letters
+
+summary_semilooper %>%
+  ggplot(aes(order_treat, percent_incidence_semilooper)) + 
+  geom_boxplot() +
+  geom_text(data = summary_semilooper_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_semilooper_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.75, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Semilooper",
+       title = "Effect of Fertilizer Treatment Rate on Corn Semi-looper Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Semilooper Percent Incidence vs Fertilizer Treatment.png")
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage to very slight```
+```Corn Borer, Semi-looper, earworm```
+```Earworm```
+```{r}
+# Earworm
+earworm_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Corn Earworm - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+earworm_df_ev$collect_date <- 
+  as.Date(earworm_df_ev$`Collection Date`, "%B %d, %Y")
+
+earworm_dmg_ev <-
+  earworm_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+earworm_joined_ev <-
+  earworm_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  # mutate(across(contains("Corn Earworm - Damage Rating "), 
+  #        ~ case_when( . < 2 ~ "No",
+  #                     . < 4 ~ "Light",
+  #                     . < 6 ~ "Moderate",
+  #                     . < 8 ~ "Severe",
+  #                     . < 10 ~ "High"), 
+  #        .names="Class_Infest_{.col}")) %>%
+  # mutate(across(contains("Class_Infest_Corn Earworm - Damage Rating "), ~classification_dmg(.))) %>%
+  # # get the modal observation rating
+  #  mutate(Modeearworm_class_infest = getmode(c_across(contains("Class_Infest_Corn Earworm - Damage Rating ")))) %>%
+  # # create ranks column
+  # mutate(earworm_mode_classification = rank(Modeearworm_class_infest))
+rowwise() %>%
+    mutate(sum_no = sum(c_across(starts_with("Corn Earworm - Damage Rating")) == "1"),
+           sum_light = sum(c_across(starts_with("Corn Earworm - Damage Rating")) == "3"),
+           sum_moderate = sum(c_across(starts_with("Corn Earworm - Damage Rating")) == "5"),
+           sum_severe = sum(c_across(starts_with("Corn Earworm - Damage Rating")) == "7"),
+           sum_high = sum(c_across(starts_with("Corn Earworm - Damage Rating")) == "9"),
+           average_damage_earworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+           damage_rating_earworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+           incidence_earworm = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+           )
+
+View(earworm_joined_ev)
+
+
+summary_earworm <-
+  earworm_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_earworm = n() * number_sampled_plants,
+            sum_avg_dmg_earworm = sum(average_damage_earworm),
+            sum_dmg_rate_earworm = sum(damage_rating_earworm),
+            sum_incidence_earworm = sum(incidence_earworm),
+            percent_incidence_earworm = (sum_incidence_earworm / total_count_samples_earworm) * percent_100)
+
+View(summary_earworm)
+
+summary_earworm %>%
+  ggplot(aes(sum_incidence_earworm)) +
+  geom_density()
+
+summary_earworm %>%
+  ggplot(aes(sum_incidence_earworm)) +
+  geom_histogram()
+
+summary_earworm %>%
+  ggplot(aes(sample=sum_incidence_earworm)) +
+  stat_qq() +
+  stat_qq_line()
+
+summary_earworm$order_treat <- ordered(summary_earworm$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_earworm$factor_corn <- factor(summary_earworm$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+
+ggqqplot(summary_earworm$sum_incidence_earworm)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_earworm <- ks.test(summary_earworm$sum_incidence_earworm, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_earworm <- ad.test(summary_earworm$sum_incidence_earworm)
+
+skew_earworm <- skewness(summary_earworm$sum_incidence_earworm)
+kurt_earworm <- kurtosis(summary_earworm$sum_incidence_earworm)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_earworm <- jarque.test(summary_earworm$sum_incidence_earworm)
+
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+# non normal according to kolmogorov-smirnov test
+kruskal_fertilizer_earworm <- kruskal.test(sum_incidence_earworm ~ order_treat, summary_earworm)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_borer <- wilcox.test(sum_incidence_earworm ~ factor_corn, summary_earworm)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_earworm <- leveneTest(sum_incidence_earworm ~ Treatment, summary_earworm)
+levenes_corntype_earworm <- leveneTest(sum_incidence_earworm ~ `Corn Type`, summary_earworm)
+levenes_municipality_earworm <- leveneTest(sum_incidence_earworm ~ Municipality, summary_earworm)
+levenes_province_earworm <- leveneTest(sum_incidence_earworm ~ Province, summary_earworm)
+levenes_fert_corn_earworm <- leveneTest(sum_incidence_earworm ~ interaction(Treatment, `Corn Type`), summary_earworm)
+
+
+summary_earworm$order_treat <- ordered(summary_earworm$Treatment,
+                         levels = c("BRFR", "RFR", "ARFR"))
+
+summary_earworm$factor_corn <- factor(labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN"), summary_earworm$`Corn Type`)
+
+# AnOVa
+aov_fert_earworm <- aov(sum_incidence_earworm ~ order_treat, summary_earworm)
+aov_corn_earworm <- aov(sum_incidence_earworm ~ factor_corn, summary_earworm) 
+ttest_corn_earworm <- t.test(sum_incidence_earworm ~ factor_corn, summary_earworm)
+
+# Two way AnOVa
+twoway_fert_corn_earworm <- aov(sum_incidence_earworm ~ order_treat + factor_corn, summary_earworm) 
+tukey_fert_corn_earworm <- TukeyHSD(twoway_fert_corn_earworm)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_earworm <- aov(sum_incidence_earworm ~ order_treat*factor_corn, summary_earworm)
+tukey_fert_corn_inter_earworm <- TukeyHSD(aov_fert_corn_inter_earworm)
+
+aov_fert_earworm %>% summary()
+aov_corn_earworm %>% summary()
+ttest_corn_earworm
+twoway_fert_corn_earworm %>% summary()
+print(tukey_fert_corn_earworm)
+aov_fert_corn_inter_earworm %>% summary()
+print(tukey_fert_corn_inter_earworm)
+
+twoway_fert_corn_earworm_letters <- multcompLetters4(twoway_fert_corn_earworm, tukey_fert_corn_earworm)
+interaction_fert_corn_earworm_letters <- multcompLetters4(aov_fert_corn_inter_earworm, tukey_fert_corn_inter_earworm)
+# detach("package:onewaytests", unload = TRUE)
+
+
+earworm_ev <-
+  earworm_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_earworm = as.numeric(incidence_earworm))
+
+
+cor_earworm_wind_incidence <- cor(earworm_ev$mean_wind, earworm_ev$incidence_earworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_earworm_temp_incidence <- cor(earworm_ev$mean_temp, earworm_ev$incidence_earworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_earworm_humid_incidence <- cor(earworm_ev$mean_humid, earworm_ev$incidence_earworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_earworm_rain_incidence <- cor(earworm_ev$mean_rain, earworm_ev$incidence_earworm, method = "pearson", use = "pairwise.complete.obs")
+
+
+# lm
+lm_rain_earworm  <- lm(incidence_earworm ~ mean_rain, data = earworm_joined_ev)
+lm_wind_earworm  <- lm(incidence_earworm ~ mean_wind, data = earworm_joined_ev)
+lm_humid_earworm <- lm(incidence_earworm ~ mean_humid, data = earworm_joined_ev)
+lm_temp_earworm  <- lm(incidence_earworm ~ mean_temp, data = earworm_joined_ev)
+
+
+temp_earworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_earworm)[1],
+    coef(lm_temp_earworm)[2],
+    round(cor_earworm_temp_incidence, 3)
+  )
+
+rain_earworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_earworm)[1],
+    coef(lm_rain_earworm)[2],
+    round(cor_earworm_rain_incidence, 3)
+  )
+
+
+wind_earworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_earworm)[1],
+    coef(lm_wind_earworm)[2],
+    round(cor_earworm_wind_incidence, 3)
+  )
+
+
+humid_earworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_earworm)[1],
+    coef(lm_humid_earworm)[2],
+    round(cor_earworm_humid_incidence, 3)
+  )
+
+
+earworm_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_earworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Earworm",
+       title = "Temperature vs Corn Earworm") +
+  annotate("label", x = 28.5, y = 13,  
+           label = temp_earworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+
+
+earworm_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_earworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Earworm",
+       title = "Wind Speed vs Corn Earworm") +
+  annotate("label", x = 7, y = 13,  
+           label = wind_earworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+
+
+earworm_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_earworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Earworm",
+       title = "Humidity vs Corn Earworm") +
+  annotate("label", x = 60, y = 13,  
+           label = humid_earworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+
+earworm_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_earworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Earworm",
+       title = "Rainfall vs Corn Earworm") +
+  annotate("label", x = 0.5, y = 13,  
+           label = rain_earworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+
+summary_earworm_corntype_bp <-
+  summary_earworm %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_earworm), sd = mean_sd(percent_incidence_earworm)) %>% 
+  arrange(desc(w))
+
+summary_earworm_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_earworm_letters$factor_corn)$Letters
+
+
+summary_earworm %>%
+  ggplot(aes(factor_corn, percent_incidence_earworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_earworm_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_earworm_corntype_bp, aes(label = round(w, 2), y = w), vjust = -0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Earworm",
+       title = "Effect of Corn Type on Corn Earworm Incidence") +
+  theme_classic()
+
+
+summary_earworm_fert_bp <-
+  summary_earworm %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_earworm), sd = mean_sd(percent_incidence_earworm)) %>% 
+  arrange(desc(w))
+
+summary_earworm_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_earworm_letters$order_treat)$Letters
+
+summary_earworm %>%
+  ggplot(aes(order_treat, percent_incidence_earworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_earworm_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_earworm_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.75, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Earworm",
+       title = "Effect of Fertilizer Treatment Rate on Corn Earworm Incidence") + 
+  theme_classic()
+
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage or No infestation ONLY```
+```Corn Planthopper, borer, Leaf feeders(Armyworm, cutworm)```
+```rating of 1 is not included in computation on damage rating and incidence```
+```Hopper```
+```{r}
+# Corn Plant Hopper
+hopper_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Corn Plant Hopper - Damage Rating")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+# convert date format
+hopper_df_ev$collect_date <- 
+  as.Date(hopper_df_ev$`Collection Date`, "%B %d, %Y")
+
+hopper_dmg_ev <-
+  hopper_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+# merged with monthly average weather parameters
+classification_dmg <- function(x) {ordered(x, levels = c("No", "Light", "Moderate", "Severe", "High"))}
+
+# 
+# rank_rating <- c(1, 3, 5, 7, 9)
+# names(rank_rating) <- c("No", "Light", "Moderate", "Severe", "High")
+# ranked_class <- rank(rank_rating)
+# factor(rank_rating, ordered=TRUE)
+# 
+# 
+# getmode <- function(v) {
+#   uniqv <- unique(v)
+#   uniqv[which.max(tabulate(match(v, uniqv)))]
+# }
+
+hopper_joined_ev <-
+  hopper_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  # mutate(across(contains("Corn Plant Hopper - Damage Rating "), 
+  #        ~ case_when( . == 1 ~ "No",
+  #                     . == 3 ~ "Light",
+  #                     . == 5 ~ "Moderate",
+  #                     . == 7 ~ "Severe",
+  #                     . == 9 ~ "High"), 
+  #        .names="Class_Infest_{.col}")) %>%
+  # mutate(across(contains("Class_Infest_Corn Plant Hopper - Damage Rating "), ~classification_dmg(.))) %>%
+  # # get the modal observation rating
+  #  mutate(Mode_class_infest_hopper = getmode(c_across(contains("Class_Infest_Corn Plant Hopper - Damage Rating ")))) %>%
+  # # create ranks column
+  # mutate(Ranked_mode_classification = rank(Mode_class_infest_hopper)) %>%
+  rowwise() %>%
+  mutate(
+             sum_no = sum(c_across(starts_with("Corn Plant Hopper - Damage Rating ")) == "1"),
+             sum_light = sum(c_across(starts_with("Corn Plant Hopper - Damage Rating ")) == "3"),
+             sum_moderate = sum(c_across(starts_with("Corn Plant Hopper - Damage Rating ")) == "5"),
+             sum_severe = sum(c_across(starts_with("Corn Plant Hopper - Damage Rating ")) == "7"),
+             sum_high = sum(c_across(starts_with("Corn Plant Hopper - Damage Rating ")) == "9"),
+             average_damage_hopper = (((3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+             damage_rating_hopper = (((3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+             incidence_hopper = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+         )
+         
+View(hopper_joined_ev)
+
+summary_hopper <-
+  hopper_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_hopper = n() * number_sampled_plants,
+            sum_avg_dmg_hopper = sum(average_damage_hopper),
+            sum_dmg_rate_hopper = sum(damage_rating_hopper),
+            sum_incidence_hopper = sum(incidence_hopper),
+            percent_incidence_hopper = (sum_incidence_hopper / total_count_samples_hopper) * percent_100)
+
+View(summary_hopper)
+
+summary_hopper %>%
+  ggplot(aes(sum_incidence_hopper)) +
+  geom_density()
+
+summary_hopper %>%
+  ggplot(aes(sum_incidence_hopper)) +
+  geom_histogram()
+
+summary_hopper %>%
+  ggplot(aes(sample=sum_incidence_hopper)) +
+  stat_qq() +
+  stat_qq_line()
+
+
+summary_hopper$order_treat <- ordered(summary_hopper$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_hopper$factor_corn <- factor(summary_hopper$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+ggqqplot(summary_hopper$sum_incidence_hopper)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_hopper <- ks.test(summary_hopper$sum_incidence_hopper, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_hopper <- ad.test(summary_hopper$sum_incidence_hopper)
+
+skew_hopper <- skewness(summary_hopper$sum_incidence_hopper)
+kurt_hopper <- kurtosis(summary_hopper$sum_incidence_hopper)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_hopper <- jarque.test(summary_hopper$sum_incidence_hopper)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_hopper <- kruskal.test(sum_incidence_hopper ~ order_treat, summary_hopper)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_hopper <- wilcox.test(sum_incidence_hopper ~ factor_corn, summary_hopper)
+
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_hopper <- leveneTest(sum_incidence_hopper ~ Treatment, summary_hopper)
+levenes_corntype_hopper <- leveneTest(sum_incidence_hopper ~ `Corn Type`, summary_hopper)
+levenes_municipality_hopper <- leveneTest(sum_incidence_hopper ~ Municipality, summary_hopper)
+levenes_province_hopper <- leveneTest(sum_incidence_hopper ~ Province, summary_hopper)
+levenes_fert_corn_hopper <- leveneTest(sum_incidence_hopper ~ interaction(Treatment, `Corn Type`), summary_hopper)
+
+# AnOVa
+aov_fert_hopper <- aov(sum_incidence_hopper ~ order_treat, summary_hopper)
+aov_corn_hopper <- aov(sum_incidence_hopper ~ factor_corn, summary_hopper) 
+ttest_corn_hopper <- t.test(sum_incidence_hopper ~ factor_corn, summary_hopper)
+
+# Two way AnOVa
+twoway_fert_corn_hopper <- aov(sum_incidence_hopper ~ order_treat + factor_corn, summary_hopper) 
+tukey_fert_corn_hopper <- TukeyHSD(twoway_fert_corn_hopper)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_hopper <- aov(sum_incidence_hopper ~ order_treat*factor_corn, summary_hopper)
+tukey_fert_corn_inter_hopper <- TukeyHSD(aov_fert_corn_inter_hopper)
+
+aov_fert_hopper %>% summary()
+aov_corn_hopper %>% summary()
+ttest_corn_hopper
+twoway_fert_corn_hopper %>% summary()
+print(tukey_fert_corn_hopper)
+aov_fert_corn_inter_hopper %>% summary()
+print(tukey_fert_corn_inter_hopper)
+
+twoway_fert_corn_hopper_letters <- multcompLetters4(twoway_fert_corn_hopper, tukey_fert_corn_hopper)
+interaction_fert_corn_hopper_letters <- multcompLetters4(aov_fert_corn_inter_hopper, tukey_fert_corn_inter_hopper)
+# detach("package:onewaytests", unload = TRUE)
+
+hopper_ev <-
+  hopper_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_hopper = as.numeric(incidence_hopper))
+
+
+cor_hopper_wind_incidence <- cor(hopper_ev$mean_wind, hopper_ev$incidence_hopper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_hopper_temp_incidence <- cor(hopper_ev$mean_temp, hopper_ev$incidence_hopper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_hopper_humid_incidence <- cor(hopper_ev$mean_humid, hopper_ev$incidence_hopper, method = "pearson", use = "pairwise.complete.obs")
+
+cor_hopper_rain_incidence <- cor(hopper_ev$mean_rain, hopper_ev$incidence_hopper, method = "pearson", use = "pairwise.complete.obs")
+
+
+# lm
+lm_rain_hopper  <- lm(incidence_hopper ~ mean_rain, data = hopper_joined_ev)
+lm_wind_hopper  <- lm(incidence_hopper ~ mean_wind, data = hopper_joined_ev)
+lm_humid_hopper <- lm(incidence_hopper ~ mean_humid, data = hopper_joined_ev)
+lm_temp_hopper  <- lm(incidence_hopper ~ mean_temp, data = hopper_joined_ev)
+
+
+temp_hopper_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_hopper)[1],
+    coef(lm_temp_hopper)[2],
+    round(cor_hopper_temp_incidence, 3)
+  )
+
+rain_hopper_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_hopper)[1],
+    coef(lm_rain_hopper)[2],
+    round(cor_hopper_rain_incidence, 3)
+  )
+
+
+wind_hopper_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_hopper)[1],
+    coef(lm_wind_hopper)[2],
+    round(cor_hopper_wind_incidence, 3)
+  )
+
+
+humid_hopper_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_hopper)[1],
+    coef(lm_humid_hopper)[2],
+    round(cor_hopper_humid_incidence, 3)
+  )
+
+
+hopper_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_hopper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Hopper",
+       title = "Temperature vs Corn Plant Hopper") +
+  annotate("label", x = 28, y = 8,  
+           label = temp_hopper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper vs Temperature.png")
+
+
+hopper_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_hopper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Hopper",
+       title = "Wind Speed vs Corn Plant Hopper") +
+  annotate("label", x = 8, y = 8,  
+           label = wind_hopper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper vs Wind.png")
+
+
+hopper_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_hopper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Hopper",
+       title = "Humidity vs Corn Plant Hopper") +
+  annotate("label", x = 60, y = 11,  
+           label = humid_hopper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper vs Humidity.png")
+
+hopper_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_hopper)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Hopper",
+       title = "Rainfall vs Corn Plant Hopper") +
+  annotate("label", x = 0.5, y = 10,  
+           label = rain_hopper_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper vs Rain.png")
+
+
+
+summary_hopper_corntype_bp <-
+  summary_hopper %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_hopper), sd = mean_sd(percent_incidence_hopper)) %>% 
+  arrange(desc(w))
+
+summary_hopper_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_hopper_letters$factor_corn)$Letters
+
+
+summary_hopper %>%
+  ggplot(aes(factor_corn, percent_incidence_hopper)) + 
+  geom_boxplot() +
+  geom_text(data = summary_hopper_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_borer_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.25, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Hopper",
+       title = "Effect of Corn Type on Corn Plant Hopper Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper Percent Incidence vs Corn Type.png")
+
+
+summary_hopper_fert_bp <-
+  summary_hopper %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_hopper), sd = mean_sd(percent_incidence_hopper)) %>% 
+  arrange(desc(w))
+
+summary_hopper_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_hopper_letters$order_treat)$Letters
+
+summary_hopper %>%
+  ggplot(aes(order_treat, percent_incidence_hopper)) + 
+  geom_boxplot() +
+  geom_text(data = summary_hopper_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_hopper_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.15, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Hopper",
+       title = "Effect of Fertilizer Treatment Rate on Corn Plant Hopper Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Hopper Percent Incidence vs Fertilizer Treatment.png")
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage or No infestation ONLY```
+```Corn Planthopper, borer, Leaf feeders(Armyworm, `cutworm`)```
+```rating of 1 is not included in computation on damage rating and incidence```
+```Cutworm```
+```{r}
+# Corn leaf feeders: Cutworm
+cutworm_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Cutworm - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+cutworm_df_ev$collect_date <- 
+  as.Date(cutworm_df_ev$`Collection Date`, "%B %d, %Y")
+
+cutworm_dmg_ev <-
+  cutworm_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+number_sampled_plants <- 20
+
+
+cutworm_joined_ev <-
+  cutworm_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  rowwise() %>%
+    mutate(sum_no = sum(c_across(starts_with("Cutworm - Damage Rating ")) == "1"),
+           sum_light = sum(c_across(starts_with("Cutworm - Damage Rating ")) == "3"),
+           sum_moderate = sum(c_across(starts_with("Cutworm - Damage Rating ")) == "5"),
+           sum_severe = sum(c_across(starts_with("Cutworm - Damage Rating ")) == "7"),
+           sum_high = sum(c_across(starts_with("Cutworm - Damage Rating ")) == "9"),
+           average_damage_cutworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+           damage_rating_cutworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+           incidence_cutworm = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+           )
+
+summary_cutworm <-
+  cutworm_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos") %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_cutworm = n() * number_sampled_plants,
+            sum_avg_dmg_cutworm = sum(average_damage_cutworm),
+            sum_dmg_rate_cutworm = sum(damage_rating_cutworm),
+            sum_incidence_cutworm = sum(incidence_cutworm),
+            percent_incidence_cutworm = (sum_incidence_cutworm / total_count_samples_cutworm) * percent_100)
+
+View(summary_cutworm)
+
+
+summary_cutworm <-
+  cutworm_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_cutworm = n() * number_sampled_plants,
+            sum_avg_dmg_cutworm = sum(average_damage_cutworm),
+            sum_dmg_rate_cutworm = sum(damage_rating_cutworm),
+            sum_incidence_cutworm = sum(incidence_cutworm),
+            percent_incidence_cutworm = (sum_incidence_cutworm / total_count_samples_cutworm) * percent_100)
+
+View(summary_cutworm)
+
+
+summary_cutworm %>%
+  ggplot(aes(sum_incidence_cutworm)) +
+  geom_density()
+
+summary_cutworm %>%
+  ggplot(aes(sum_incidence_cutworm)) +
+  geom_histogram()
+
+summary_cutworm %>%
+  ggplot(aes(sample=sum_incidence_cutworm)) +
+  stat_qq() +
+  stat_qq_line()
+
+summary_cutworm$order_treat <- ordered(summary_cutworm$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_cutworm$factor_corn <- factor(summary_cutworm$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+ggqqplot(summary_cutworm$sum_incidence_cutworm)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_cutworm <- ks.test(summary_cutworm$sum_incidence_cutworm, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_cutworm <- ad.test(summary_cutworm$sum_incidence_cutworm)
+
+skew_cutworm <- skewness(summary_cutworm$sum_incidence_cutworm)
+kurt_cutworm <- kurtosis(summary_cutworm$sum_incidence_cutworm)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_cutworm <- jarque.test(summary_cutworm$sum_incidence_cutworm)
+
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_cutworm <- kruskal.test(sum_incidence_cutworm ~ order_treat, summary_cutworm)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_cutworm <- wilcox.test(sum_incidence_cutworm ~ factor_corn, summary_cutworm)
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_cutworm <- leveneTest(sum_incidence_cutworm ~ Treatment, summary_cutworm)
+levenes_corntype_cutworm <- leveneTest(sum_incidence_cutworm ~ `Corn Type`, summary_cutworm)
+levenes_municipality_cutworm <- leveneTest(sum_incidence_cutworm ~ Municipality, summary_cutworm)
+levenes_province_cutworm <- leveneTest(sum_incidence_cutworm ~ Province, summary_cutworm)
+levenes_fert_corn_cutworm <- leveneTest(sum_incidence_cutworm ~ interaction(Treatment, `Corn Type`), summary_cutworm)
+
+
+# AnOVa
+aov_fert_cutworm <- aov(sum_incidence_cutworm ~ order_treat, summary_cutworm)
+aov_corn_cutworm <- aov(sum_incidence_cutworm ~ factor_corn, summary_cutworm) 
+ttest_corn_cutworm <- t.test(sum_incidence_cutworm ~ factor_corn, summary_cutworm)
+
+# Two way AnOVa
+twoway_fert_corn_cutworm <- aov(sum_incidence_cutworm ~ order_treat + factor_corn, summary_cutworm) 
+tukey_fert_corn_cutworm <- TukeyHSD(twoway_fert_corn_cutworm)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_cutworm <- aov(sum_incidence_cutworm ~ order_treat*factor_corn, summary_cutworm)
+tukey_fert_corn_inter_cutworm <- TukeyHSD(aov_fert_corn_inter_cutworm)
+
+aov_fert_cutworm %>% summary()
+aov_corn_cutworm %>% summary()
+ttest_corn_cutworm
+twoway_fert_corn_cutworm %>% summary()
+print(tukey_fert_corn_cutworm)
+aov_fert_corn_inter_cutworm %>% summary()
+print(tukey_fert_corn_inter_cutworm)
+
+twoway_fert_corn_cutworm_letters <- multcompLetters4(twoway_fert_corn_cutworm, tukey_fert_corn_cutworm)
+interaction_fert_corn_cutworm_letters <- multcompLetters4(aov_fert_corn_inter_cutworm, tukey_fert_corn_inter_cutworm)
+# detach("package:onewaytests", unload = TRUE)
+
+cutworm_ev <-
+  cutworm_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_cutworm = as.numeric(incidence_cutworm))
+
+
+cor_cutworm_wind_incidence <- cor(cutworm_ev$mean_wind, cutworm_ev$incidence_cutworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_cutworm_temp_incidence <- cor(cutworm_ev$mean_temp, cutworm_ev$incidence_cutworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_cutworm_humid_incidence <- cor(cutworm_ev$mean_humid, cutworm_ev$incidence_cutworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_cutworm_rain_incidence <- cor(cutworm_ev$mean_rain, cutworm_ev$incidence_cutworm, method = "pearson", use = "pairwise.complete.obs")
+
+
+# lm
+lm_rain_cutworm  <- lm(incidence_cutworm ~ mean_rain, data = cutworm_joined_ev)
+lm_wind_cutworm  <- lm(incidence_cutworm ~ mean_wind, data = cutworm_joined_ev)
+lm_humid_cutworm <- lm(incidence_cutworm ~ mean_humid, data = cutworm_joined_ev)
+lm_temp_cutworm  <- lm(incidence_cutworm ~ mean_temp, data = cutworm_joined_ev)
+
+
+temp_cutworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_cutworm)[1],
+    coef(lm_temp_cutworm)[2],
+    round(cor_cutworm_temp_incidence, 3)
+  )
+
+rain_cutworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_cutworm)[1],
+    coef(lm_rain_cutworm)[2],
+    round(cor_cutworm_rain_incidence, 3)
+  )
+
+
+wind_cutworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_cutworm)[1],
+    coef(lm_wind_cutworm)[2],
+    round(cor_cutworm_wind_incidence, 3)
+  )
+
+
+humid_cutworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_cutworm)[1],
+    coef(lm_humid_cutworm)[2],
+    round(cor_cutworm_humid_incidence, 3)
+  )
+
+
+cutworm_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_cutworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Cutworm",
+       title = "Temperature vs Cutworm") +
+  annotate("label", x = 28, y = 8,  
+           label = temp_cutworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm vs Temperature.png")
+
+
+cutworm_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_cutworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Cutworm",
+       title = "Wind Speed vs Cutworm") +
+  annotate("label", x = 8, y = 8,  
+           label = wind_cutworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm vs Wind.png")
+
+
+cutworm_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_cutworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Cutworm",
+       title = "Humidity vs Cutworm") +
+  annotate("label", x = 60, y = 8,  
+           label = humid_cutworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm vs Humidity.png")
+
+cutworm_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_cutworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Cutworm",
+       title = "Rainfall vs Cutworm") +
+  annotate("label", x = 0.5, y = 10,  
+           label = rain_cutworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm vs Rain.png")
+
+
+summary_cutworm_corntype_bp <-
+  summary_cutworm %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_cutworm), sd = mean_sd(percent_incidence_cutworm)) %>% 
+  arrange(desc(w))
+
+summary_cutworm_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_cutworm_letters$factor_corn)$Letters
+
+
+summary_cutworm %>%
+  ggplot(aes(factor_corn, percent_incidence_cutworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_cutworm_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_cutworm_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.5, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Cutworm",
+       title = "Effect of Corn Type to Cutworm Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm Percent Incidence vs Corn Type.png")
+
+
+
+summary_cutworm_fert_bp <-
+  summary_cutworm %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_cutworm), sd = mean_sd(percent_incidence_cutworm)) %>% 
+  arrange(desc(w))
+
+summary_cutworm_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_cutworm_letters$order_treat)$Letters
+
+summary_cutworm %>%
+  ggplot(aes(order_treat, percent_incidence_cutworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_cutworm_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_cutworm_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 2.85, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Cutworm",
+       title = "Effect of Fertilizer Treatment Rate to Cutworm Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Cutworm Percent Incidence vs Fertilizer Treatment.png")
+
+
+detach("package:MASS", unload = T)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage or No infestation ONLY```
+```Corn Planthopper, aphids, Leaf feeders(Armyworm, cutworm)```
+```rating of 1 is not included in computation on damage rating and incidence```
+```Armyworm```
+
+```{r}
+# Corn leaf feeders: Armyworm
+armyworm_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, starts_with("Armyworm - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus")
+
+armyworm_df_ev$collect_date <- 
+  as.Date(armyworm_df_ev$`Collection Date`, "%B %d, %Y")
+
+armyworm_dmg_ev <-
+  armyworm_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+number_sampled_plants <- 20
+
+
+armyworm_joined_ev <-
+  armyworm_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  rowwise() %>%
+    mutate(sum_no = sum(c_across(starts_with("Armyworm - Damage Rating ")) == "1"),
+           sum_light = sum(c_across(starts_with("Armyworm - Damage Rating ")) == "3"),
+           sum_moderate = sum(c_across(starts_with("Armyworm - Damage Rating ")) == "5"),
+           sum_severe = sum(c_across(starts_with("Armyworm - Damage Rating ")) == "7"),
+           sum_high = sum(c_across(starts_with("Armyworm - Damage Rating ")) == "9"),
+           average_damage_armyworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants)),
+           damage_rating_armyworm = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+           incidence_armyworm = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+           )
+
+View(armyworm_joined_ev)
+
+summary_armyworm <-
+  armyworm_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_armyworm = n() * number_sampled_plants,
+            sum_avg_dmg_armyworm = sum(average_damage_armyworm),
+            sum_dmg_rate_armyworm = sum(damage_rating_armyworm),
+            sum_incidence_armyworm = sum(incidence_armyworm),
+            percent_incidence_armyworm = (sum_incidence_armyworm / total_count_samples_armyworm) * percent_100)
+
+View(summary_armyworm)
+
+
+summary_armyworm %>%
+  ggplot(aes(sum_incidence_armyworm)) +
+  geom_density()
+
+summary_armyworm %>%
+  ggplot(aes(sum_incidence_armyworm)) +
+  geom_histogram()
+
+summary_armyworm %>%
+  ggplot(aes(sample=sum_incidence_armyworm)) +
+  stat_qq() +
+  stat_qq_line()
+
+
+summary_armyworm$order_treat <- ordered(summary_armyworm$Treatment,
+                                     levels = c("BRFR", "RFR", "ARFR"),
+                                     labels = c("B", "R", "A"))
+
+summary_armyworm$factor_corn <- factor(summary_armyworm$`Corn Type`, 
+                                    labels=c("N", "G"), 
+                                    levels = c("Non - GM Corn", "GM CORN"))
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+ggqqplot(summary_armyworm$sum_incidence_armyworm)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_armyworm <- ks.test(summary_armyworm$sum_incidence_armyworm, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_armyworm <- ad.test(summary_armyworm$sum_incidence_armyworm)
+
+skew_armyworm <- skewness(summary_armyworm$sum_incidence_armyworm)
+kurt_armyworm <- kurtosis(summary_armyworm$sum_incidence_armyworm)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_armyworm <- jarque.test(summary_armyworm$sum_incidence_armyworm)
+
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_armyworm <- kruskal.test(sum_incidence_armyworm ~ order_treat, summary_armyworm)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_armyworm <- wilcox.test(sum_incidence_armyworm ~ factor_corn, summary_armyworm)
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_armyworm <- leveneTest(sum_incidence_armyworm ~ Treatment, summary_armyworm)
+levenes_corntype_armyworm <- leveneTest(sum_incidence_armyworm ~ `Corn Type`, summary_armyworm)
+levenes_municipality_armyworm <- leveneTest(sum_incidence_armyworm ~ Municipality, summary_armyworm)
+levenes_province_armyworm <- leveneTest(sum_incidence_armyworm ~ Province, summary_armyworm)
+levenes_fert_corn_armyworm <- leveneTest(sum_incidence_armyworm ~ interaction(Treatment, `Corn Type`), summary_armyworm)
+
+
+# AnOVa
+aov_fert_armyworm <- aov(sum_incidence_armyworm ~ order_treat, summary_armyworm)
+ttest_corn_armyworm <- t.test(sum_incidence_armyworm ~ factor_corn, summary_armyworm)
+
+# Kruskall-Wallis on corn type
+kruskall_corn_armyworm <- kruskal.test(sum_incidence_armyworm ~ factor_corn, summary_armyworm)
+
+# Two way AnOVa
+twoway_fert_corn_armyworm <- aov(sum_incidence_armyworm ~ order_treat + factor_corn, summary_armyworm) 
+tukey_fert_corn_armyworm <- TukeyHSD(twoway_fert_corn_armyworm)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_armyworm <- aov(sum_incidence_armyworm ~ order_treat*factor_corn, summary_armyworm)
+tukey_fert_corn_inter_armyworm <- TukeyHSD(aov_fert_corn_inter_armyworm)
+
+aov_fert_armyworm %>% summary()
+
+ttest_corn_armyworm
+twoway_fert_corn_armyworm %>% summary()
+kruskall_corn_armyworm
+print(tukey_fert_corn_armyworm)
+aov_fert_corn_inter_armyworm %>% summary()
+print(tukey_fert_corn_inter_armyworm)
+
+twoway_fert_corn_armyworm_letters <- multcompLetters4(twoway_fert_corn_armyworm, tukey_fert_corn_armyworm)
+interaction_fert_corn_armyworm_letters <- multcompLetters4(aov_fert_corn_inter_armyworm, tukey_fert_corn_inter_armyworm)
+# detach("package:onewaytests", unload = TRUE)
+
+armyworm_ev <-
+  armyworm_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_armyworm = as.numeric(incidence_armyworm))
+
+
+cor_armyworm_wind_incidence <- cor(armyworm_ev$mean_wind, armyworm_ev$incidence_armyworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_armyworm_temp_incidence <- cor(armyworm_ev$mean_temp, armyworm_ev$incidence_armyworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_armyworm_humid_incidence <- cor(armyworm_ev$mean_humid, armyworm_ev$incidence_armyworm, method = "pearson", use = "pairwise.complete.obs")
+
+cor_armyworm_rain_incidence <- cor(armyworm_ev$mean_rain, armyworm_ev$incidence_armyworm, method = "pearson", use = "pairwise.complete.obs")
+
+
+# lm
+lm_rain_armyworm  <- lm(incidence_armyworm ~ mean_rain, data = armyworm_joined_ev)
+lm_wind_armyworm  <- lm(incidence_armyworm ~ mean_wind, data = armyworm_joined_ev)
+lm_humid_armyworm <- lm(incidence_armyworm ~ mean_humid, data = armyworm_joined_ev)
+lm_temp_armyworm  <- lm(incidence_armyworm ~ mean_temp, data = armyworm_joined_ev)
+
+
+temp_armyworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_armyworm)[1],
+    coef(lm_temp_armyworm)[2],
+    round(cor_armyworm_temp_incidence, 3)
+  )
+
+rain_armyworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_armyworm)[1],
+    coef(lm_rain_armyworm)[2],
+    round(cor_armyworm_rain_incidence, 3)
+  )
+
+
+wind_armyworm_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_armyworm)[1],
+    coef(lm_wind_armyworm)[2],
+    round(cor_armyworm_wind_incidence, 3)
+  )
+
+
+humid_armyworm_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_armyworm)[1],
+    coef(lm_humid_armyworm)[2],
+    round(cor_armyworm_humid_incidence, 3)
+  )
+
+
+armyworm_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_armyworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Armyworm",
+       title = "Temperature vs Armyworm") +
+  annotate("label", x = 28, y = 12,  
+           label = temp_armyworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm vs Temperature.png")
+
+
+armyworm_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_armyworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Armyworm",
+       title = "Wind Speed vs Armyworm") +
+  annotate("label", x = 7.5, y = 12,  
+           label = wind_armyworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm vs Wind.png")
+
+
+armyworm_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_armyworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Armyworm",
+       title = "Humidity vs Armyworm") +
+  annotate("label", x = 60, y = 12,  
+           label = humid_armyworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm vs Humidity.png")
+
+
+armyworm_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_armyworm)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Armyworm",
+       title = "Rainfall vs Armyworm") +
+  annotate("label", x = 0.5, y = 12,  
+           label = rain_armyworm_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm vs Rain.png")
+
+
+summary_armyworm_corntype_bp <-
+  summary_armyworm %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_armyworm), sd = mean_sd(percent_incidence_armyworm)) %>% 
+  arrange(desc(w))
+
+summary_armyworm_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_armyworm_letters$factor_corn)$Letters
+
+
+summary_armyworm %>%
+  ggplot(aes(factor_corn, percent_incidence_armyworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_armyworm_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_armyworm_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Armyworm",
+       title = "Effect of Corn Type on Armyworm Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm Percent Incidence vs Corn Type.png")
+
+
+summary_armyworm_fert_bp <-
+  summary_armyworm %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_armyworm), sd = mean_sd(percent_incidence_armyworm)) %>% 
+  arrange(desc(w))
+
+summary_armyworm_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_armyworm_letters$order_treat)$Letters
+
+summary_armyworm %>%
+  ggplot(aes(order_treat, percent_incidence_armyworm)) + 
+  geom_boxplot() +
+  geom_text(data = summary_armyworm_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_armyworm_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Armyworm",
+       title = "Effect of Fertilizer Treatment Rate on Armyworm Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Armyworm Percent Incidence vs Fertilizer Treatment.png")
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+
+```Rating of 1 is classified as No damage or No infestation ONLY```
+```Corn Planthopper, aphids, Leaf feeders(Armyworm, cutworm)```
+```rating of 1 is not included in computation on damage rating and incidence```
+```Aphids```
+
+```{r}
+# Aphids
+aphids_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, starts_with("Aphids - Damage Rating ")) %>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus") 
+
+aphids_df_ev$collect_date <- 
+  as.Date(aphids_df_ev$`Collection Date`, "%B %d, %Y")
+
+aphids_dmg_ev <-
+  aphids_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+
+aphids_joined_ev <-
+  aphids_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  # mutate_at(c(9:28), as.factor) %>%
+  rowwise() %>%
+    mutate(sum_no = sum(c_across(starts_with("Aphids - Damage Rating ")) == "1"),
+           sum_light = sum(c_across(starts_with("Aphids - Damage Rating ")) == "3"),
+           sum_moderate = sum(c_across(starts_with("Aphids - Damage Rating ")) == "5"),
+           sum_severe = sum(c_across(starts_with("Aphids - Damage Rating ")) == "7"),
+           sum_high = sum(c_across(starts_with("Aphids - Damage Rating ")) == "9"),
+           average_damage_aphids = ((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants),
+           damage_rating_aphids = (((1 * sum_no) + (3 * sum_light) + (5 * sum_moderate) + (7 * sum_severe) + (9 * sum_high)) / (number_sampled_plants * 9)) * percent_100,
+           incidence_aphids = ((sum(c_across(sum_light:sum_high))) * percent_100) / number_sampled_plants,
+           )
+
+View(aphids_joined_ev)
+
+summary_aphids <-
+  aphids_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_aphids = n() * number_sampled_plants,
+            sum_avg_dmg_aphids = sum(average_damage_aphids),
+            sum_dmg_rate_aphids = sum(damage_rating_aphids),
+            sum_incidence_aphids = sum(incidence_aphids),
+            percent_incidence_aphids = (sum_incidence_aphids / total_count_samples_aphids) * percent_100)
+
+View(summary_aphids)
+
+
+summary_aphids %>%
+  ggplot(aes(sum_incidence_aphids)) +
+  geom_density()
+
+summary_aphids %>%
+  ggplot(aes(sum_incidence_aphids)) +
+  geom_histogram()
+
+summary_aphids %>%
+  ggplot(aes(sample=sum_incidence_aphids)) +
+  stat_qq() +
+  stat_qq_line()
+
+summary_aphids$order_treat <- ordered(summary_aphids$Treatment,
+                         levels = c("BRFR", "RFR", "ARFR"))
+
+summary_aphids$factor_corn <- factor(labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN"), summary_aphids$`Corn Type`)
+
+library("nortest")
+library("moments")
+library("stats")
+library("MASS")
+
+ggqqplot(summary_aphids$sum_incidence_aphids)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_aphids <- ks.test(summary_aphids$sum_incidence_aphids, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_aphids <- ad.test(summary_aphids$sum_incidence_aphids)
+
+skew_aphids <- skewness(summary_aphids$sum_incidence_aphids)
+kurt_aphids <- kurtosis(summary_aphids$sum_incidence_aphids)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_aphids <- jarque.test(summary_aphids$sum_incidence_aphids)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_aphids <- kruskal.test(sum_incidence_aphids ~ order_treat, summary_aphids)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_aphids <- wilcox.test(sum_incidence_aphids ~ factor_corn, summary_aphids)
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_aphids <- leveneTest(sum_incidence_aphids ~ Treatment, summary_aphids)
+levenes_corntype_aphids <- leveneTest(sum_incidence_aphids ~ `Corn Type`, summary_aphids)
+levenes_municipality_aphids <- leveneTest(sum_incidence_aphids ~ Municipality, summary_aphids)
+levenes_province_aphids <- leveneTest(sum_incidence_aphids ~ Province, summary_aphids)
+levenes_fert_corn_aphids <- leveneTest(sum_incidence_aphids ~ interaction(Treatment, `Corn Type`), summary_aphids)
+
+
+# AnOVa
+aov_fert_aphids <- aov(sum_incidence_aphids ~ order_treat, summary_aphids)
+ttest_corn_aphids <- t.test(sum_incidence_aphids ~ factor_corn, summary_aphids)
+
+# Kruskall-Wallis on corn type
+kruskall_corn_aphids <- kruskal.test(sum_incidence_aphids ~ factor_corn, summary_aphids)
+
+# Two way AnOVa
+twoway_fert_corn_aphids <- aov(sum_incidence_aphids ~ order_treat + factor_corn, summary_aphids) 
+tukey_fert_corn_aphids <- TukeyHSD(twoway_fert_corn_aphids)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_aphids <- aov(sum_incidence_aphids ~ order_treat*factor_corn, summary_aphids)
+tukey_fert_corn_inter_aphids <- TukeyHSD(aov_fert_corn_inter_aphids)
+
+aov_fert_aphids %>% summary()
+ttest_corn_aphids
+twoway_fert_corn_aphids %>% summary()
+print(tukey_fert_corn_aphids)
+aov_fert_corn_inter_aphids %>% summary()
+print(tukey_fert_corn_inter_aphids)
+
+twoway_fert_corn_aphids_letters <- multcompLetters4(twoway_fert_corn_aphids, tukey_fert_corn_aphids)
+interaction_fert_corn_aphids_letters <- multcompLetters4(aov_fert_corn_inter_aphids, tukey_fert_corn_inter_aphids)
+# detach("package:onewaytests", unload = TRUE)
+
+aphids_ev <-
+  aphids_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_aphids = as.numeric(incidence_aphids))
+
+
+cor_aphids_wind_incidence <- cor(aphids_ev$mean_wind, aphids_ev$incidence_aphids, method = "pearson", use = "pairwise.complete.obs")
+
+cor_aphids_temp_incidence <- cor(aphids_ev$mean_temp, aphids_ev$incidence_aphids, method = "pearson", use = "pairwise.complete.obs")
+
+cor_aphids_humid_incidence <- cor(aphids_ev$mean_humid, aphids_ev$incidence_aphids, method = "pearson", use = "pairwise.complete.obs")
+
+cor_aphids_rain_incidence <- cor(aphids_ev$mean_rain, aphids_ev$incidence_aphids, method = "pearson", use = "pairwise.complete.obs")
+
+
+detach("package:nortest", unload = TRUE)
+detach("package:moments", unload = TRUE)
+
+# lm
+lm_rain_aphids  <- lm(incidence_aphids ~ mean_rain, data = aphids_joined_ev)
+lm_wind_aphids  <- lm(incidence_aphids ~ mean_wind, data = aphids_joined_ev)
+lm_humid_aphids <- lm(incidence_aphids ~ mean_humid, data = aphids_joined_ev)
+lm_temp_aphids  <- lm(incidence_aphids ~ mean_temp, data = aphids_joined_ev)
+
+
+temp_aphids_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_aphids)[1],
+    coef(lm_temp_aphids)[2],
+    round(cor_aphids_temp_incidence, 3)
+  )
+
+rain_aphids_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_aphids)[1],
+    coef(lm_rain_aphids)[2],
+    round(cor_aphids_rain_incidence, 3)
+  )
+
+
+wind_aphids_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_aphids)[1],
+    coef(lm_wind_aphids)[2],
+    round(cor_aphids_wind_incidence, 3)
+  )
+
+
+humid_aphids_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_aphids)[1],
+    coef(lm_humid_aphids)[2],
+    round(cor_aphids_humid_incidence, 3)
+  )
+
+
+aphids_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_aphids)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence Aphids",
+       title = "Temperature vs Aphids") +
+  annotate("label", x = 27.5, y = 12,  
+           label = temp_aphids_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids vs Temperature.png")
+
+
+aphids_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_aphids)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence Aphids",
+       title = "Wind Speed vs Aphids") +
+  annotate("label", x = 7.5, y = 8,  
+           label = wind_aphids_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids vs Wind.png")
+
+
+aphids_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_aphids)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence Aphids",
+       title = "Humidity vs Aphids") +
+  annotate("label", x = 60, y = 8,  
+           label = humid_aphids_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids vs Humidity.png")
+
+aphids_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_aphids)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence Aphids",
+       title = "Rainfall vs Aphids") +
+  annotate("label", x = 0.5, y = 11,  
+           label = rain_aphids_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids vs Rain.png")
+
+summary_aphids_corntype_bp <-
+  summary_aphids %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_aphids), sd = mean_sd(percent_incidence_aphids)) %>% 
+  arrange(desc(w))
+
+summary_aphids_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_aphids_letters$factor_corn)$Letters
+
+
+summary_aphids %>%
+  ggplot(aes(factor_corn, percent_incidence_aphids)) + 
+  geom_boxplot() +
+  geom_text(data = summary_aphids_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_aphids_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence Aphids",
+       title = "Effect of Corn Type on Aphids Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids Percent Incidence vs Corn Type.png")
+
+
+summary_aphids_fert_bp <-
+  summary_aphids %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_aphids), sd = mean_sd(percent_incidence_aphids)) %>% 
+  arrange(desc(w))
+
+summary_aphids_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_aphids_letters$order_treat)$Letters
+
+summary_aphids %>%
+  ggplot(aes(order_treat, percent_incidence_aphids)) + 
+  geom_boxplot() +
+  geom_text(data = summary_aphids_fert_bp, aes(label = treatment_cld,
+                y = w + sd$ymax), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_aphids_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence Aphids",
+       title = "Effect of Fertilizer Treatment Rate on Aphids Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "Aphids Percent Incidence vs Fertilizer Treatment.png")
+
+detach("package:MASS", unload = TRUE)
+detach("package:stats", unload = TRUE)
+```
+
+```Fall armyworm has different rating scale (according to dashboard)```
+```{r}
+# Fall Armyworm
+faw_df_ev <- 
+  insect_raw %>%
+  select(FarmID, `Collection Date`, Province, Municipality, `Crop Stage`, Treatment, `Corn Type`, Variety, contains("Fall Armyworm - Damage Rating"))%>%
+  filter(Municipality != "Santa Rita" & Municipality != "Hilongos" & Municipality != "Tomas Oppus") 
+
+faw_df_ev$collect_date <- 
+  as.Date(faw_df_ev$`Collection Date`, "%B %d, %Y")
+
+faw_dmg_ev <-
+  faw_df_ev %>% 
+  mutate(Year = year(collect_date), Month = month(collect_date))
+
+faw_joined_ev <-
+  faw_dmg_ev %>% 
+  left_join(monthly_averages, by=c('Year', 'Month')) %>%
+  rowwise() %>%
+  mutate(sum_0 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "0"),
+         sum_1 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "1"),
+         sum_2 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "2"),
+         sum_3 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "3"),
+         sum_4 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "4"),
+         sum_5 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "5"),
+         sum_6 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "6"),
+         sum_7 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "7"),
+         sum_8 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "8"),
+         sum_9 = sum(c_across(starts_with("Fall Armyworm - Damage Rating ")) == "9"),
+         average_damage_faw = (((1 * sum_1) + (3 * sum_3) + (5 * sum_5) + (7 * sum_7) + (9 * sum_9) + (2 * sum_2) + (4 * sum_4) + (6 * sum_6) + (8 * sum_8)) / (number_sampled_plants)),
+         damage_rating_faw = (((1 * sum_1) + (3 * sum_3) + (5 * sum_5) + (7 * sum_7) + (9 * sum_9) + (2 * sum_2) + (4 * sum_4) + (6 * sum_6) + (8 * sum_8)) / (number_sampled_plants * 9)) * percent_100,
+         incidence_faw = ((sum(c_across(sum_1:sum_9)))* percent_100) / number_sampled_plants,
+         )
+
+View(faw_joined_ev)
+
+summary_faw <-
+  faw_joined_ev %>%
+  group_by(Province, Municipality, `Corn Type`, Treatment) %>%
+  remove_missing(na.rm=TRUE) %>%
+  summarise(total_count_samples_faw = n() * number_sampled_plants,
+            sum_avg_dmg_faw = sum(average_damage_faw),
+            sum_dmg_rate_faw = sum(damage_rating_faw),
+            sum_incidence_faw = sum(incidence_faw),
+            percent_incidence_faw = (sum_incidence_faw / total_count_samples_faw) * percent_100)
+
+View(summary_faw)
+
+summary_faw %>%
+  ggplot(aes(percent_incidence_faw)) +
+  geom_density()
+
+summary_faw %>%
+  ggplot(aes(percent_incidence_faw)) +
+  geom_histogram()
+
+summary_faw %>%
+  ggplot(aes(sample=percent_incidence_faw)) +
+  stat_qq() +
+  stat_qq_line()
+
+
+summary_faw$order_treat <- ordered(summary_faw$Treatment,
+                         levels = c("BRFR", "RFR", "ARFR"))
+
+summary_faw$factor_corn <- factor(labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN"), summary_faw$`Corn Type`)
+
+library("nortest")
+library("moments")
+library("stats")
+ggqqplot(summary_faw$percent_incidence_faw)
+
+# Kolmogorov Smirnov test for normality samples > 50
+ks_test_faw <- ks.test(summary_faw$percent_incidence_faw, 'pnorm')
+
+# Anderson-Darling Test is a goodness-of-fit test that determines how well your data fits a given distribution. 
+# This test is most typically used to see if your data follow a normal distribution or not.
+ad_test_faw <- ad.test(summary_faw$percent_incidence_faw)
+
+skew_faw <- skewness(summary_faw$percent_incidence_faw)
+kurt_faw <- kurtosis(summary_faw$percent_incidence_faw)
+
+# Jarque-Bera Normality Test performs a goodness-of-fit test that 
+# determines whether or not sample data have skewness and 
+# kurtosis that matches a normal distribution.
+jarq_faw <- jarque.test(summary_faw$percent_incidence_faw)
+
+# Kruskall Wallis applied to one-way, non-normal data with more than two groups
+kruskal_fertilizer_faw <- kruskal.test(percent_incidence_faw ~ order_treat, summary_faw)
+
+# Mann-Whitney U test for differences between two independent treatments or conditions.   
+# The continuous response variable of interest is not normally distributed.
+utest_corn_faw <- wilcox.test(percent_incidence_faw ~ factor_corn, summary_faw)
+
+# Null hypothesis is variances across all samples are equal. 
+# Levene’s test is an alternative to Bartlett’s test when the data is not normally distributed.
+levenes_fertilizer_faw <- leveneTest(percent_incidence_faw ~ Treatment, summary_faw)
+levenes_corntype_faw <- leveneTest(percent_incidence_faw ~ `Corn Type`, summary_faw)
+levenes_municipality_faw <- leveneTest(percent_incidence_faw ~ Municipality, summary_faw)
+levenes_province_faw <- leveneTest(percent_incidence_faw ~ Province, summary_faw)
+levenes_fert_corn_faw <- leveneTest(percent_incidence_faw ~ interaction(Treatment, `Corn Type`), summary_faw)
+
+
+# AnOVa
+aov_fert_faw <- aov(percent_incidence_faw ~ order_treat, summary_faw)
+aov_corn_faw <- aov(percent_incidence_faw ~ factor_corn, summary_faw)
+
+ttest_corn_faw <- t.test(percent_incidence_faw ~ factor_corn, summary_faw)
+
+# # Kruskall-Wallis on corn type
+# kruskall_corn_faw <- kruskal.test(percent_incidence_faw ~ factor_corn, summary_faw)
+
+# Two way AnOVa
+twoway_fert_corn_faw <- aov(percent_incidence_faw ~ order_treat + factor_corn, summary_faw) 
+tukey_fert_corn_faw <- TukeyHSD(twoway_fert_corn_faw)
+
+# AnOVa with Interaction
+aov_fert_corn_inter_faw <- aov(percent_incidence_faw ~ order_treat*factor_corn, summary_faw)
+tukey_fert_corn_inter_faw <- TukeyHSD(aov_fert_corn_inter_faw)
+
+
+# Results print
+aov_fert_faw %>% summary()
+ttest_corn_faw
+aov_corn_faw %>% summary()
+
+twoway_fert_corn_faw %>% summary()
+kruskal_fertilizer_faw
+utest_corn_faw
+
+print(tukey_fert_corn_faw)
+aov_fert_corn_inter_faw %>% summary()
+print(tukey_fert_corn_inter_faw)
+
+twoway_fert_corn_faw_letters <- multcompLetters4(twoway_fert_corn_faw, tukey_fert_corn_faw)
+interaction_fert_corn_faw_letters <- multcompLetters4(aov_fert_corn_inter_faw, tukey_fert_corn_inter_faw)
+# detach("package:onewaytests", unload = TRUE)
+
+faw_ev <-
+  faw_joined_ev %>%
+  mutate(Province = factor(Province),
+         Municipality = factor(Municipality),
+         crop_stage = factor(`Crop Stage`),
+         treatment = factor(Treatment),
+         corn_type = factor(`Corn Type`, labels=c("N", "G"), levels=c("Non - GM Corn", "GM CORN")),
+         incidence_faw = as.numeric(incidence_faw))
+
+
+cor_faw_wind_incidence <- cor(faw_ev$mean_wind, faw_ev$incidence_faw, method = "pearson", use = "pairwise.complete.obs")
+
+cor_faw_temp_incidence <- cor(faw_ev$mean_temp, faw_ev$incidence_faw, method = "pearson", use = "pairwise.complete.obs")
+
+cor_faw_humid_incidence <- cor(faw_ev$mean_humid, faw_ev$incidence_faw, method = "pearson", use = "pairwise.complete.obs")
+
+cor_faw_rain_incidence <- cor(faw_ev$mean_rain, faw_ev$incidence_faw, method = "pearson", use = "pairwise.complete.obs")
+
+detach("package:nortest", unload = TRUE)
+detach("package:moments", unload = TRUE)
+
+
+# lm
+lm_rain_faw  <- lm(incidence_faw ~ mean_rain, data = faw_joined_ev)
+lm_wind_faw  <- lm(incidence_faw ~ mean_wind, data = faw_joined_ev)
+lm_humid_faw <- lm(incidence_faw ~ mean_humid, data = faw_joined_ev)
+lm_temp_faw  <- lm(incidence_faw ~ mean_temp, data = faw_joined_ev)
+
+
+temp_faw_eqn <- sprintf(
+    "italic(y) == %.3g + %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_temp_faw)[1],
+    coef(lm_temp_faw)[2],
+    round(cor_faw_temp_incidence, 3)
+  )
+
+rain_faw_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_rain_faw)[1],
+    coef(lm_rain_faw)[2],
+    round(cor_faw_rain_incidence, 3)
+  )
+
+
+wind_faw_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_wind_faw)[1],
+    coef(lm_wind_faw)[2],
+    round(cor_faw_wind_incidence, 3)
+  )
+
+
+humid_faw_eqn <- sprintf(
+    "italic(y) == %.3g %.3g * italic(x) * ',' ~~ r ~ '=' ~ %.2g",
+    coef(lm_humid_faw)[1],
+    coef(lm_humid_faw)[2],
+    round(cor_faw_humid_incidence, 3)
+  )
+
+
+faw_joined_ev %>%
+  ggplot(aes(mean_temp, incidence_faw)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Temperature (C)", 
+       y = "Incidence FAW",
+       title = "Temperature vs FAW") +
+  annotate("label", x = 27.5, y = 25,  
+           label = temp_faw_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW vs Temperature.png")
+
+
+faw_joined_ev %>%
+  ggplot(aes(mean_wind, incidence_faw)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Wind Speed (km/h)", 
+       y = "Incidence FAW",
+       title = "Wind Speed vs FAW") +
+  annotate("label", x = 7.5, y = 25,  
+           label = wind_faw_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW vs Wind.png")
+
+
+faw_joined_ev %>%
+  ggplot(aes(mean_humid, incidence_faw)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.7) +
+  labs(x = "Monthly Average Humidity (%)", 
+       y = "Incidence FAW",
+       title = "Humidity vs FAW") +
+  annotate("label", x = 60, y = 35,  
+           label = humid_faw_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW vs Humidity.png")
+
+faw_joined_ev %>%
+  ggplot(aes(mean_rain, incidence_faw)) +
+  geom_point(color = "gray", show.legend = FALSE) +
+  geom_smooth(formula = "y~x", method="lm", se=FALSE, size = 1.5) +
+  labs(x = "Monthly Average Rainfall (mm)", 
+       y = "Incidence FAW",
+       title = "Rainfall vs FAW") +
+  annotate("label", x = 0.4, y = 25,  
+           label = rain_faw_eqn,
+           parse = TRUE, color = "red", size = 5) +
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW vs Rain.png")
+
+summary_faw_corntype_bp <-
+  summary_faw %>% 
+  group_by(factor_corn) %>% 
+  summarise(w=mean(percent_incidence_faw), sd = mean_sd(percent_incidence_faw)) %>% 
+  arrange(desc(w))
+
+summary_faw_corntype_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_faw_letters$factor_corn)$Letters
+
+
+summary_faw %>%
+  ggplot(aes(factor_corn, percent_incidence_faw)) + 
+  geom_boxplot() +
+  geom_text(data = summary_faw_corntype_bp, aes(label = treatment_cld,
+                y = w + sd$y), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_faw_corntype_bp, aes(label = round(w, 2), y = sd$y), vjust = 0.8, alpha = 0.75, color = "darkblue") +
+  labs(x = "Corn Type (GM or Non-GM)", 
+       y = "Percent Incidence FAW",
+       title = "Effect of Corn Type on FAW Incidence") +
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW Percent Incidence vs Corn Type.png")
+
+
+summary_faw_fert_bp <-
+  summary_faw %>% 
+  group_by(order_treat) %>% 
+  summarise(w=mean(percent_incidence_faw), sd = mean_sd(percent_incidence_faw)) %>% 
+  arrange(desc(w))
+
+summary_faw_fert_bp$treatment_cld <- 
+  as.data.frame.list(twoway_fert_corn_faw_letters$order_treat)$Letters
+
+summary_faw %>%
+  ggplot(aes(order_treat, percent_incidence_faw)) + 
+  geom_boxplot() +
+  geom_text(data = summary_faw_fert_bp, aes(label = treatment_cld,
+                y = w + sd$y), vjust = -0.5, color="red", size = 5) +
+  geom_text(data = summary_faw_fert_bp, aes(label = round(w, 2), y = sd$y), vjust = 1.25, alpha = 0.75, color = "darkblue") +
+  labs(x = "Fertilizer Treatment Rate", 
+       y = "Percent Incidence FAW",
+       title = "Effect of Fertilizer Treatment Rate on FAW Incidence") + 
+  theme_classic()
+ggsave(path = "../pests", filename = "FAW Percent Incidence vs Fertilizer Treatment.png")
+
+
+detach("package:stats", unload = TRUE)
+```
+
+
+``` Correlation: Incidence vs Weather Parameters```
+```{r}
+# faw, hopper, cutworm, armyworm, aphids, borer, earworm, semilooper
+library("correlation")
+
+# earworm
+earworm_cor_test_wind <- cor_test(earworm_ev, "mean_wind", "incidence_earworm")
+earworm_cor_test_temp <- cor_test(earworm_ev, "mean_temp", "incidence_earworm")
+earworm_cor_test_humid <- cor_test(earworm_ev, "mean_humid", "incidence_earworm")
+earworm_cor_test_rain <- cor_test(earworm_ev, "mean_rain", "incidence_earworm")
+
+corr_earworm_df <- data.frame(
+  weather_parameter = c(earworm_cor_test_wind$Parameter1, earworm_cor_test_temp$Parameter1, earworm_cor_test_humid$Parameter1, earworm_cor_test_rain$Parameter1),
+  incidence = c(earworm_cor_test_wind$Parameter2, earworm_cor_test_temp$Parameter2, earworm_cor_test_humid$Parameter2, earworm_cor_test_rain$Parameter2),
+  r_coef = c(earworm_cor_test_wind$r, earworm_cor_test_temp$r, earworm_cor_test_humid$r, earworm_cor_test_rain$r),
+  p_val  = c(earworm_cor_test_wind$p, earworm_cor_test_temp$p, earworm_cor_test_humid$p, earworm_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# borer
+borer_cor_test_wind <- cor_test(borer_ev, "mean_wind", "incidence_borer")
+borer_cor_test_temp <- cor_test(borer_ev, "mean_temp", "incidence_borer")
+borer_cor_test_humid <- cor_test(borer_ev, "mean_humid", "incidence_borer")
+borer_cor_test_rain <- cor_test(borer_ev, "mean_rain", "incidence_borer")
+
+corr_borer_df <- data.frame(
+  weather_parameter = c(borer_cor_test_wind$Parameter1, borer_cor_test_temp$Parameter1, borer_cor_test_humid$Parameter1, borer_cor_test_rain$Parameter1),
+  incidence = c(borer_cor_test_wind$Parameter2, borer_cor_test_temp$Parameter2, borer_cor_test_humid$Parameter2, borer_cor_test_rain$Parameter2),
+  r_coef = c(borer_cor_test_wind$r, borer_cor_test_temp$r, borer_cor_test_humid$r, borer_cor_test_rain$r),
+  p_val  = c(borer_cor_test_wind$p, borer_cor_test_temp$p, borer_cor_test_humid$p, borer_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# semilooper
+semilooper_cor_test_wind <- cor_test(semilooper_ev, "mean_wind", "incidence_semilooper")
+semilooper_cor_test_temp <- cor_test(semilooper_ev, "mean_temp", "incidence_semilooper")
+semilooper_cor_test_humid <- cor_test(semilooper_ev, "mean_humid", "incidence_semilooper")
+semilooper_cor_test_rain <- cor_test(semilooper_ev, "mean_rain", "incidence_semilooper")
+
+corr_semilooper_df <- data.frame(
+  weather_parameter = c(semilooper_cor_test_wind$Parameter1, semilooper_cor_test_temp$Parameter1, semilooper_cor_test_humid$Parameter1, semilooper_cor_test_rain$Parameter1),
+  incidence = c(semilooper_cor_test_wind$Parameter2, semilooper_cor_test_temp$Parameter2, semilooper_cor_test_humid$Parameter2, semilooper_cor_test_rain$Parameter2),
+  r_coef = c(semilooper_cor_test_wind$r, semilooper_cor_test_temp$r, semilooper_cor_test_humid$r, semilooper_cor_test_rain$r),
+  p_val  = c(semilooper_cor_test_wind$p, semilooper_cor_test_temp$p, semilooper_cor_test_humid$p, semilooper_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# cutworm
+cutworm_cor_test_wind <- cor_test(cutworm_ev, "mean_wind", "incidence_cutworm")
+cutworm_cor_test_temp <- cor_test(cutworm_ev, "mean_temp", "incidence_cutworm")
+cutworm_cor_test_humid <- cor_test(cutworm_ev, "mean_humid", "incidence_cutworm")
+cutworm_cor_test_rain <- cor_test(cutworm_ev, "mean_rain", "incidence_cutworm")
+
+corr_cutworm_df <- data.frame(
+  weather_parameter = c(cutworm_cor_test_wind$Parameter1, cutworm_cor_test_temp$Parameter1, cutworm_cor_test_humid$Parameter1, cutworm_cor_test_rain$Parameter1),
+  incidence = c(cutworm_cor_test_wind$Parameter2, cutworm_cor_test_temp$Parameter2, cutworm_cor_test_humid$Parameter2, cutworm_cor_test_rain$Parameter2),
+  r_coef = c(cutworm_cor_test_wind$r, cutworm_cor_test_temp$r, cutworm_cor_test_humid$r, cutworm_cor_test_rain$r),
+  p_val  = c(cutworm_cor_test_wind$p, cutworm_cor_test_temp$p, cutworm_cor_test_humid$p, cutworm_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# hopper
+hopper_cor_test_wind <- cor_test(hopper_ev, "mean_wind", "incidence_hopper")
+hopper_cor_test_temp <- cor_test(hopper_ev, "mean_temp", "incidence_hopper")
+hopper_cor_test_humid <- cor_test(hopper_ev, "mean_humid", "incidence_hopper")
+hopper_cor_test_rain <- cor_test(hopper_ev, "mean_rain", "incidence_hopper")
+
+corr_hopper_df <- data.frame(
+  weather_parameter = c(hopper_cor_test_wind$Parameter1, hopper_cor_test_temp$Parameter1, hopper_cor_test_humid$Parameter1, hopper_cor_test_rain$Parameter1),
+  incidence = c(hopper_cor_test_wind$Parameter2, hopper_cor_test_temp$Parameter2, hopper_cor_test_humid$Parameter2, hopper_cor_test_rain$Parameter2),
+  r_coef = c(hopper_cor_test_wind$r, hopper_cor_test_temp$r, hopper_cor_test_humid$r, hopper_cor_test_rain$r),
+  p_val  = c(hopper_cor_test_wind$p, hopper_cor_test_temp$p, hopper_cor_test_humid$p, hopper_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+
+# aphids
+aphids_cor_test_wind <- cor_test(aphids_ev, "mean_wind", "incidence_aphids")
+aphids_cor_test_temp <- cor_test(aphids_ev, "mean_temp", "incidence_aphids")
+aphids_cor_test_humid <- cor_test(aphids_ev, "mean_humid", "incidence_aphids")
+aphids_cor_test_rain <- cor_test(aphids_ev, "mean_rain", "incidence_aphids")
+
+corr_aphids_df <- data.frame(
+  weather_parameter = c(aphids_cor_test_wind$Parameter1, aphids_cor_test_temp$Parameter1, aphids_cor_test_humid$Parameter1, aphids_cor_test_rain$Parameter1),
+  incidence = c(aphids_cor_test_wind$Parameter2, aphids_cor_test_temp$Parameter2, aphids_cor_test_humid$Parameter2, aphids_cor_test_rain$Parameter2),
+  r_coef = c(aphids_cor_test_wind$r, aphids_cor_test_temp$r, aphids_cor_test_humid$r, aphids_cor_test_rain$r),
+  p_val  = c(aphids_cor_test_wind$p, aphids_cor_test_temp$p, aphids_cor_test_humid$p, aphids_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# armyworm
+armyworm_cor_test_wind <- cor_test(armyworm_ev, "mean_wind", "incidence_armyworm")
+armyworm_cor_test_temp <- cor_test(armyworm_ev, "mean_temp", "incidence_armyworm")
+armyworm_cor_test_humid <- cor_test(armyworm_ev, "mean_humid", "incidence_armyworm")
+armyworm_cor_test_rain <- cor_test(armyworm_ev, "mean_rain", "incidence_armyworm")
+
+corr_armyworm_df <- data.frame(
+  weather_parameter = c(armyworm_cor_test_wind$Parameter1, armyworm_cor_test_temp$Parameter1, armyworm_cor_test_humid$Parameter1, armyworm_cor_test_rain$Parameter1),
+  incidence = c(armyworm_cor_test_wind$Parameter2, armyworm_cor_test_temp$Parameter2, armyworm_cor_test_humid$Parameter2, armyworm_cor_test_rain$Parameter2),
+  r_coef = c(armyworm_cor_test_wind$r, armyworm_cor_test_temp$r, armyworm_cor_test_humid$r, armyworm_cor_test_rain$r),
+  p_val  = c(armyworm_cor_test_wind$p, armyworm_cor_test_temp$p, armyworm_cor_test_humid$p, armyworm_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# faw
+faw_cor_test_wind <- cor_test(faw_ev, "mean_wind", "incidence_faw")
+faw_cor_test_temp <- cor_test(faw_ev, "mean_temp", "incidence_faw")
+faw_cor_test_humid <- cor_test(faw_ev, "mean_humid", "incidence_faw")
+faw_cor_test_rain <- cor_test(faw_ev, "mean_rain", "incidence_faw")
+
+corr_faw_df <- data.frame(
+  weather_parameter = c(faw_cor_test_wind$Parameter1, faw_cor_test_temp$Parameter1, faw_cor_test_humid$Parameter1, faw_cor_test_rain$Parameter1),
+  incidence = c(faw_cor_test_wind$Parameter2, faw_cor_test_temp$Parameter2, faw_cor_test_humid$Parameter2, faw_cor_test_rain$Parameter2),
+  r_coef = c(faw_cor_test_wind$r, faw_cor_test_temp$r, faw_cor_test_humid$r, faw_cor_test_rain$r),
+  p_val  = c(faw_cor_test_wind$p, faw_cor_test_temp$p, faw_cor_test_humid$p, faw_cor_test_rain$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+weather_pest_corr <-
+  corr_faw_df %>% 
+  full_join(corr_hopper_df) %>% 
+  full_join(corr_cutworm_df) %>% 
+  full_join(corr_armyworm_df) %>%
+  full_join(corr_aphids_df) %>%
+  full_join(corr_borer_df) %>%
+  full_join(corr_earworm_df) %>%
+  full_join(corr_semilooper_df)
+
+weather_pest_corr
+
+```
+
+
+```Pest correlation with rstatix package```
+```{r}
+# faw, hopper, cutworm, armyworm, aphids, borer, earworm, semilooper
+library("rstatix")
+
+# earworm
+earworm_cor_windx <- cor_test(earworm_ev, "mean_wind", "incidence_earworm")
+earworm_cor_tempx <- cor_test(earworm_ev, "mean_temp", "incidence_earworm")
+earworm_cor_humidx <- cor_test(earworm_ev, "mean_humid", "incidence_earworm")
+earworm_cor_rainx <- cor_test(earworm_ev, "mean_rain", "incidence_earworm")
+
+corr_earworm_dfx <- data.frame(
+  weather_parameter = c(earworm_cor_windx$var1, earworm_cor_tempx$var1, earworm_cor_humidx$var1, earworm_cor_rainx$var1),
+  incidence = c(earworm_cor_windx$var2, earworm_cor_tempx$var2, earworm_cor_humidx$var2, earworm_cor_rainx$var2),
+  r_coef = c(earworm_cor_windx$cor, earworm_cor_tempx$cor, earworm_cor_humidx$cor, earworm_cor_rainx$cor),
+  p_val  = c(earworm_cor_windx$p, earworm_cor_tempx$p, earworm_cor_humidx$p, earworm_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# borer
+borer_cor_windx <- cor_test(borer_ev, "mean_wind", "incidence_borer")
+borer_cor_tempx <- cor_test(borer_ev, "mean_temp", "incidence_borer")
+borer_cor_humidx <- cor_test(borer_ev, "mean_humid", "incidence_borer")
+borer_cor_rainx <- cor_test(borer_ev, "mean_rain", "incidence_borer")
+
+corr_borer_dfx <- data.frame(
+  weather_parameter = c(borer_cor_windx$var1, borer_cor_tempx$var1, borer_cor_humidx$var1, borer_cor_rainx$var1),
+  incidence = c(borer_cor_windx$var2, borer_cor_tempx$var2, borer_cor_humidx$var2, borer_cor_rainx$var2),
+  r_coef = c(borer_cor_windx$cor, borer_cor_tempx$cor, borer_cor_humidx$cor, borer_cor_rainx$cor),
+  p_val  = c(borer_cor_windx$p, borer_cor_tempx$p, borer_cor_humidx$p, borer_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# semilooper
+semilooper_cor_windx <- cor_test(semilooper_ev, "mean_wind", "incidence_semilooper")
+semilooper_cor_tempx <- cor_test(semilooper_ev, "mean_temp", "incidence_semilooper")
+semilooper_cor_humidx <- cor_test(semilooper_ev, "mean_humid", "incidence_semilooper")
+semilooper_cor_rainx <- cor_test(semilooper_ev, "mean_rain", "incidence_semilooper")
+
+corr_semilooper_dfx <- data.frame(
+  weather_parameter = c(semilooper_cor_windx$var1, semilooper_cor_tempx$var1, semilooper_cor_humidx$var1, semilooper_cor_rainx$var1),
+  incidence = c(semilooper_cor_windx$var2, semilooper_cor_tempx$var2, semilooper_cor_humidx$var2, semilooper_cor_rainx$var2),
+  r_coef = c(semilooper_cor_windx$cor, semilooper_cor_tempx$cor, semilooper_cor_humidx$cor, semilooper_cor_rainx$cor),
+  p_val  = c(semilooper_cor_windx$p, semilooper_cor_tempx$p, semilooper_cor_humidx$p, semilooper_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+# cutworm
+cutworm_cor_windx <- cor_test(cutworm_ev, "mean_wind", "incidence_cutworm")
+cutworm_cor_tempx <- cor_test(cutworm_ev, "mean_temp", "incidence_cutworm")
+cutworm_cor_humidx <- cor_test(cutworm_ev, "mean_humid", "incidence_cutworm")
+cutworm_cor_rainx <- cor_test(cutworm_ev, "mean_rain", "incidence_cutworm")
+
+corr_cutworm_dfx <- data.frame(
+  weather_parameter = c(cutworm_cor_windx$var1, cutworm_cor_tempx$var1, cutworm_cor_humidx$var1, cutworm_cor_rainx$var1),
+  incidence = c(cutworm_cor_windx$var2, cutworm_cor_tempx$var2, cutworm_cor_humidx$var2, cutworm_cor_rainx$var2),
+  r_coef = c(cutworm_cor_windx$cor, cutworm_cor_tempx$cor, cutworm_cor_humidx$cor, cutworm_cor_rainx$cor),
+  p_val  = c(cutworm_cor_windx$p, cutworm_cor_tempx$p, cutworm_cor_humidx$p, cutworm_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# hopper
+hopper_cor_windx <- cor_test(hopper_ev, "mean_wind", "incidence_hopper")
+hopper_cor_tempx <- cor_test(hopper_ev, "mean_temp", "incidence_hopper")
+hopper_cor_humidx <- cor_test(hopper_ev, "mean_humid", "incidence_hopper")
+hopper_cor_rainx <- cor_test(hopper_ev, "mean_rain", "incidence_hopper")
+
+corr_hopper_dfx <- data.frame(
+  weather_parameter = c(hopper_cor_windx$var1, hopper_cor_tempx$var1, hopper_cor_humidx$var1, hopper_cor_rainx$var1),
+  incidence = c(hopper_cor_windx$var2, hopper_cor_tempx$var2, hopper_cor_humidx$var2, hopper_cor_rainx$var2),
+  r_coef = c(hopper_cor_windx$cor, hopper_cor_tempx$cor, hopper_cor_humidx$cor, hopper_cor_rainx$cor),
+  p_val  = c(hopper_cor_windx$p, hopper_cor_tempx$p, hopper_cor_humidx$p, hopper_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+
+# aphids
+aphids_cor_windx <- cor_test(aphids_ev, "mean_wind", "incidence_aphids")
+aphids_cor_tempx <- cor_test(aphids_ev, "mean_temp", "incidence_aphids")
+aphids_cor_humidx <- cor_test(aphids_ev, "mean_humid", "incidence_aphids")
+aphids_cor_rainx <- cor_test(aphids_ev, "mean_rain", "incidence_aphids")
+
+corr_aphids_dfx <- data.frame(
+  weather_parameter = c(aphids_cor_windx$var1, aphids_cor_tempx$var1, aphids_cor_humidx$var1, aphids_cor_rainx$var1),
+  incidence = c(aphids_cor_windx$var2, aphids_cor_tempx$var2, aphids_cor_humidx$var2, aphids_cor_rainx$var2),
+  r_coef = c(aphids_cor_windx$cor, aphids_cor_tempx$cor, aphids_cor_humidx$cor, aphids_cor_rainx$cor),
+  p_val  = c(aphids_cor_windx$p, aphids_cor_tempx$p, aphids_cor_humidx$p, aphids_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# armyworm
+armyworm_cor_windx <- cor_test(armyworm_ev, "mean_wind", "incidence_armyworm")
+armyworm_cor_tempx <- cor_test(armyworm_ev, "mean_temp", "incidence_armyworm")
+armyworm_cor_humidx <- cor_test(armyworm_ev, "mean_humid", "incidence_armyworm")
+armyworm_cor_rainx <- cor_test(armyworm_ev, "mean_rain", "incidence_armyworm")
+
+corr_armyworm_dfx <- data.frame(
+  weather_parameter = c(armyworm_cor_windx$var1, armyworm_cor_tempx$var1, armyworm_cor_humidx$var1, armyworm_cor_rainx$var1),
+  incidence = c(armyworm_cor_windx$var2, armyworm_cor_tempx$var2, armyworm_cor_humidx$var2, armyworm_cor_rainx$var2),
+  r_coef = c(armyworm_cor_windx$cor, armyworm_cor_tempx$cor, armyworm_cor_humidx$cor, armyworm_cor_rainx$cor),
+  p_val  = c(armyworm_cor_windx$p, armyworm_cor_tempx$p, armyworm_cor_humidx$p, armyworm_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+# faw
+faw_cor_windx <- cor_test(faw_ev, "mean_wind", "incidence_faw")
+faw_cor_tempx <- cor_test(faw_ev, "mean_temp", "incidence_faw")
+faw_cor_humidx <- cor_test(faw_ev, "mean_humid", "incidence_faw")
+faw_cor_rainx <- cor_test(faw_ev, "mean_rain", "incidence_faw")
+
+corr_faw_dfx <- data.frame(
+  weather_parameter = c(faw_cor_windx$var1, faw_cor_tempx$var1, faw_cor_humidx$var1, faw_cor_rainx$var1),
+  incidence = c(faw_cor_windx$var2, faw_cor_tempx$var2, faw_cor_humidx$var2, faw_cor_rainx$var2),
+  r_coef = c(faw_cor_windx$cor, faw_cor_tempx$cor, faw_cor_humidx$cor, faw_cor_rainx$cor),
+  p_val  = c(faw_cor_windx$p, faw_cor_tempx$p, faw_cor_humidx$p, faw_cor_rainx$p)
+) %>% mutate(r_coef = round(r_coef, 3),
+             p_val = round(p_val, 4))
+
+
+
+weather_pest_corrstatix <-
+  corr_faw_dfx %>% 
+  full_join(corr_hopper_dfx) %>% 
+  full_join(corr_cutworm_dfx) %>% 
+  full_join(corr_armyworm_dfx) %>%
+  full_join(corr_aphids_dfx) %>%
+  full_join(corr_borer_dfx) %>%
+  full_join(corr_earworm_dfx) %>%
+  full_join(corr_semilooper_dfx)
+
+weather_pest_corrstatix
+
+detach("package:ggpubr", unload = TRUE)
+detach("package:rstatix", unload = TRUE)
+```
+
+
+```{r}
+# faw
+print(paste(round(correlation::cor_to_p(cor_faw_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and FAW incidence."))
+print(paste(round(correlation::cor_to_p(cor_faw_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and FAW incidence."))
+print(paste(round(correlation::cor_to_p(cor_faw_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and FAW incidence."))
+print(paste(round(correlation::cor_to_p(cor_faw_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and FAW incidence."))
+
+# aphids
+print(paste(round(correlation::cor_to_p(cor_aphids_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and aphids incidence."))
+print(paste(round(correlation::cor_to_p(cor_aphids_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and aphids incidence."))
+print(paste(round(correlation::cor_to_p(cor_aphids_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and aphids incidence."))
+print(paste(round(correlation::cor_to_p(cor_aphids_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and aphids incidence."))
+
+
+# borer
+print(paste(round(correlation::cor_to_p(cor_borer_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and borer incidence."))
+print(paste(round(correlation::cor_to_p(cor_borer_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and borer incidence."))
+print(paste(round(correlation::cor_to_p(cor_borer_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and borer incidence."))
+print(paste(round(correlation::cor_to_p(cor_borer_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and borer incidence."))
+
+
+# earworm
+print(paste(round(correlation::cor_to_p(cor_earworm_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and earworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_earworm_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and earworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_earworm_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and earworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_earworm_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and earworm incidence."))
+
+
+# Armyworm
+print(paste(round(correlation::cor_to_p(cor_armyworm_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and armyworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_armyworm_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and armyworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_armyworm_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and armyworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_armyworm_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and armyworm incidence."))
+
+
+# Cutworm
+print(paste(round(correlation::cor_to_p(cor_cutworm_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and cutworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_cutworm_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and cutworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_cutworm_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and cutworm incidence."))
+print(paste(round(correlation::cor_to_p(cor_cutworm_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and cutworm incidence."))
+
+# Hopper
+print(paste(round(correlation::cor_to_p(cor_hopper_wind_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of wind speed and hopper incidence."))
+print(paste(round(correlation::cor_to_p(cor_hopper_temp_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of temperature and hopper incidence."))
+print(paste(round(correlation::cor_to_p(cor_hopper_humid_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of humidity and hopper incidence."))
+print(paste(round(correlation::cor_to_p(cor_hopper_rain_incidence, sample_size_corr)$p, decimal_places), "correlation p-value of rainfall and hopper incidence."))
+
+
+
+```
+
+
+
+
+```{r}
+# library("bestNormalize")
+# bestNorm_semilooper <- predict(bestNormalize(summary_semilooper$percent_incidence_semilooper, out_of_sample = FALSE, loo = TRUE))
+# detach("package:bestNormalize", unload = TRUE)
+
+# 
+# # center_scale(x) tranformation according to bestNormalize
+# summary_semilooper$orq <- bestNorm_semilooper
+# 
+# # Test of Normality after transformation
+# ks_test_semilooper_trans <- ks.test(summary_semilooper$orq, 'pnorm')
+# ad_test_semilooper_trans <- ad.test(summary_semilooper$orq)
+# skew_semilooper_trans <- skewness(summary_semilooper$orq)
+# kurt_semilooper_trans <- kurtosis(summary_semilooper$orq)
+# jarq_semilooper_trans <- jarque.test(summary_semilooper$orq)
+# 
+# 
+# # Test of Homoskedasticity after transformation
+# levenes_fertilizer_semilooper_trans <- leveneTest(orq ~ Treatment, summary_semilooper)
+# levenes_corntype_semilooper_trans <- leveneTest(orq ~ `Corn Type`, summary_semilooper)
+# levenes_municipality_semilooper_trans <- leveneTest(orq ~ Municipality, summary_semilooper)
+# levenes_province_semilooper_trans <- leveneTest(orq ~ Province, summary_semilooper)
+# levenes_fert_corn_semilooper_trans <- leveneTest(orq ~ interaction(Treatment, `Corn Type`), summary_semilooper)
+# 
+# summary_semilooper %>%
+#   ggplot(aes(orq)) +
+#   geom_density()
+# 
+# # anova on Transformation
+# aov_fert_semilooper_yj <- aov(orq ~ order_treat, summary_semilooper) %>% summary()
+# aov_corn_semilooper_yj <- aov(orq ~ factor_corn, summary_semilooper) %>% summary()
+# # Two way AnOVa
+# 
+# twoway_fert_corn_semilooper_yj <- aov(orq ~ order_treat + factor_corn, summary_semilooper) 
+# tukey_fert_corn_semilooper <- TukeyHSD(twoway_fert_corn_semilooper_yj)
+# 
+# # AnOVa with Interaction
+# aov_fert_corn_inter_semilooper_yj <- aov(orq ~ order_treat*factor_corn, summary_semilooper)  %>% summary()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
